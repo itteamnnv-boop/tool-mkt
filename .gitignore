@@ -1,0 +1,20 @@
+# Virtual environment
+.venv/
+venv/
+
+# Python bytecode/cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Generated content (images/videos/screenshots) — large binaries, not source
+output/
+
+# Local env vars (real values only — .env.example stays tracked)
+.env
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
