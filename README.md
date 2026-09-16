@@ -171,10 +171,3 @@ và bấm **Đăng bài** để đăng lên các Page đã chọn.
   khoản/kênh** mỗi loại (không hỗ trợ nhiều tài khoản như Facebook), và không hỗ trợ lên lịch đăng —
   đăng là lên ngay lập tức.
 
-
-mongodb://it_admin:BrPN34xFmHo5U4Nr@ac-ixgqgwe-shard-00-00.dtz81lj.mongodb.net:27017,ac-ixgqgwe-shard-00-01.dtz81lj.mongodb.net:27017,ac-ixgqgwe-shard-00-02.dtz81lj.mongodb.net:27017/claude_content_studio?ssl=true&replicaSet=atlas-rqggr5-shard-0&authSource=admin&appName=Cluster0
-
-
-
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.venv\Scripts\activate
