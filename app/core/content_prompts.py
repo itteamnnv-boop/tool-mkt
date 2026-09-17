@@ -6,6 +6,22 @@ SYSTEM_PROMPT_POST = (
     "cho fanpage doanh nghiệp. Viết ngắn gọn, hấp dẫn, đúng giọng điệu yêu cầu, "
     "có emoji phù hợp (không lạm dụng), có call-to-action rõ ràng ở cuối."
 )
+POST_PROMPT_KEY = "content_post_system"
+
+
+def get_post_system_prompt() -> str:
+    from app.storage import history_store
+    saved = history_store.get_prompt(POST_PROMPT_KEY)
+    return saved if saved and saved.strip() else SYSTEM_PROMPT_POST
+
+
+def save_post_system_prompt(text: str) -> str:
+    from app.storage import history_store
+    text = text.strip()
+    history_store.save_prompt(POST_PROMPT_KEY, text)
+    return text
+
+
 SYSTEM_PROMPT_IMAGE_PROMPT = "Bạn là chuyên gia viết prompt cho công cụ tạo ảnh AI."
 SYSTEM_PROMPT_VIDEO_SCRIPT = "Bạn là biên kịch video quảng cáo ngắn."
 SYSTEM_PROMPT_VIDEO_SCRIPT_FROM_REFERENCE = (

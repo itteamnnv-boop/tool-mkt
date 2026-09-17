@@ -1,7 +1,6 @@
 """Tab: đăng video lên YouTube qua Data API v3 (resumable upload)."""
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 from PySide6.QtCore import Signal
@@ -19,44 +18,14 @@ from PySide6.QtWidgets import (
 )
 
 from app import config
-from app.core.youtube_client import CATEGORY_LABELS, PRIVACY_LABELS, VIDEO_FILE_FILTER, YouTubeClient, refresh_access_token
+from app.core.youtube_client import CATEGORY_LABELS, PRIVACY_LABELS, VIDEO_FILE_FILTER, YouTubeClient
 from app.storage import history_store
 from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import arrange_cards
 from app.workers.async_worker import Worker
 
 
-def _ensure_valid_token(on_progress=None) -> str:
-    """Returns a still-valid YouTube access token, refreshing it first if it's expired or
-    about to expire. Runs inside a worker thread — talks to config (keyring/JSON) directly,
-    same pattern as tiktok_tab.py's _ensure_valid_token."""
-    account = config.get_youtube_account()
-    access_token = account.get("access_token", "")
-    if not access_token:
-        raise ValueError("Chưa kết nối YouTube — vào tab 'Kết nối YouTube' trước.")
-
-    expires_at = account.get("token_expires_at", 0) or 0
-    if time.time() < expires_at - 300:  # still valid for 5+ more minutes
-        return access_token
-
-    if on_progress:
-        on_progress("Access token YouTube sắp hết hạn, đang làm mới...")
-    settings = config.load_settings()
-    client_id = settings.get("youtube_client_id", "")
-    client_secret = config.get_secret("youtube_client_secret")
-    refresh_token = account.get("refresh_token", "")
-    if not client_id or not client_secret or not refresh_token:
-        raise ValueError("Token YouTube đã hết hạn — vào tab 'Kết nối YouTube' để đăng nhập lại.")
-
-    tokens = refresh_access_token(client_id, client_secret, refresh_token)
-    config.save_youtube_account(
-        channel_title=account.get("channel_title", ""),
-        channel_id=account.get("channel_id", ""),
-        access_token=tokens["access_token"],
-        refresh_token=tokens.get("refresh_token", ""),  # "" means: keep the existing one, see config.py
-        expires_at=tokens.get("expires_at", 0),
-    )
-    return tokens["access_token"]
+from app.core.social_tokens import ensure_youtube_token as _ensure_valid_token
 
 
 class YouTubeTab(QWidget):

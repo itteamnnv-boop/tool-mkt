@@ -1,13 +1,12 @@
 """Tab 3: tạo video avatar nói bằng HeyGen, hoặc video từ mô tả bằng Grok (xAI)."""
 from __future__ import annotations
 
-import os
 import threading
 from pathlib import Path
 
 import requests
-from PySide6.QtGui import QPixmap
-from PySide6.QtCore import Signal
+from PySide6.QtGui import QPixmap, QDesktopServices
+from PySide6.QtCore import Signal, QUrl
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -599,7 +598,8 @@ class VideoTab(QWidget):
 
     def _on_open_video(self) -> None:
         if self._current_video_path:
-            os.startfile(self._current_video_path)  # noqa: S606 - user-initiated, local file only
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._current_video_path.resolve()))):
+                self.log_message.emit("Không thể mở video. Hãy kiểm tra trình phát video mặc định.", "error")
 
     def _on_use_for_post(self) -> None:
         if self._current_video_path:

@@ -1,12 +1,14 @@
 """Entry point: khởi động Claude Content Studio."""
 import sys
+import os
 import traceback
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtGui import QIcon
 
+from app.ui.theme import apply_theme
 from app.ui.main_window import MainWindow
 
 
@@ -57,38 +59,6 @@ class CodeReloader:
         self.window.toast.show_message("Không thể tự tải lại ứng dụng.", "error")
 
 
-def _load_stylesheet() -> str:
-    style_path = Path(__file__).resolve().parent / "app" / "resources" / "style.qss"
-    try:
-        return style_path.read_text(encoding="utf-8")
-    except OSError:
-        return ""
-
-
-def apply_theme(app: QApplication) -> None:
-    """Use a dark native palette as well as QSS for menus and calendar popups."""
-    app.setStyle("Fusion")
-    palette = QPalette()
-    for role, color in {
-        QPalette.ColorRole.Window: "#1c232c",
-        QPalette.ColorRole.WindowText: "#e0e5ea",
-        QPalette.ColorRole.Base: "#1c242e",
-        QPalette.ColorRole.AlternateBase: "#26333f",
-        QPalette.ColorRole.Text: "#e0e5ea",
-        QPalette.ColorRole.Button: "#263440",
-        QPalette.ColorRole.ButtonText: "#e0e5ea",
-        QPalette.ColorRole.Highlight: "#236773",
-        QPalette.ColorRole.HighlightedText: "#ffffff",
-        QPalette.ColorRole.PlaceholderText: "#899daa",
-        QPalette.ColorRole.ToolTipBase: "#22343f",
-        QPalette.ColorRole.ToolTipText: "#dbe8ec",
-        QPalette.ColorRole.Link: "#49c5cc",
-    }.items():
-        palette.setColor(role, QColor(color))
-    app.setPalette(palette)
-    app.setStyleSheet(_load_stylesheet())
-
-
 def _install_exception_safety_net() -> None:
     """PySide6 aborts the whole process on an unhandled exception raised inside a Qt slot
     (e.g. a signal callback from a background worker). Without this hook, a single bug in
@@ -112,11 +82,14 @@ def _install_exception_safety_net() -> None:
 def main() -> int:
     app = QApplication(sys.argv)
     _install_exception_safety_net()
-    app.setApplicationName("")
+    app.setApplicationName("Claude Content Studio")
+    app.setDesktopFileName("claude-content-studio")
+    app.setWindowIcon(QIcon(str(Path(__file__).resolve().parent / "app" / "resources" / "studio.svg")))
     apply_theme(app)
     window = MainWindow()
     window.show()
-    CodeReloader(app, window)
+    if os.environ.get("CLAUDE_STUDIO_NO_RELOAD") != "1" and not getattr(sys, "frozen", False):
+        CodeReloader(app, window)
     return app.exec()
 
 

@@ -44,6 +44,17 @@ def init_db() -> None:
     _get_db().client.admin.command("ping")
 
 
+def get_prompt(key: str) -> str | None:
+    document = _get_db()["prompts"].find_one({"_id": key})
+    return document["text"] if document else None
+
+
+def save_prompt(key: str, text: str) -> None:
+    _get_db()["prompts"].update_one(
+        {"_id": key}, {"$set": {"text": text, "updated_at": datetime.now()}}, upsert=True
+    )
+
+
 def add_content(topic: str, text: str) -> None:
     _get_db()["contents"].insert_one({"created_at": datetime.now(), "topic": topic, "text": text})
 

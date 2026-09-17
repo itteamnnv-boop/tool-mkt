@@ -51,6 +51,14 @@ CREATE TABLE IF NOT EXISTS token_usage (
 );
 """
 
+PROMPT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS prompts (
+    key TEXT PRIMARY KEY,
+    text TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
 
 def _db_path() -> Path:
     return app_data_dir() / "history.sqlite3"
@@ -69,6 +77,7 @@ def _connect():
 def init_db() -> None:
     with _connect() as conn:
         conn.executescript(SCHEMA)
+        conn.executescript(PROMPT_SCHEMA)
         _ensure_column(conn, "posts", "page_id", "TEXT DEFAULT ''")
         _ensure_column(conn, "posts", "page_name", "TEXT DEFAULT ''")
         _ensure_column(conn, "posts", "ok", "INTEGER DEFAULT 1")
@@ -79,6 +88,23 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str)
     existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
     if column not in existing:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
+def get_prompt(key: str) -> str | None:
+    with _connect() as conn:
+        conn.executescript(PROMPT_SCHEMA)
+        row = conn.execute("SELECT text FROM prompts WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+
+def save_prompt(key: str, text: str) -> None:
+    with _connect() as conn:
+        conn.executescript(PROMPT_SCHEMA)
+        conn.execute(
+            "INSERT INTO prompts (key, text, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
+            (key, text, datetime.now().isoformat(timespec="seconds")),
+        )
 
 
 def add_content(topic: str, text: str) -> None:

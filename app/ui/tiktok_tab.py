@@ -1,7 +1,6 @@
 """Tab: đăng video lên TikTok qua Content Posting API (Direct Post, chỉ hỗ trợ video)."""
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 from PySide6.QtCore import Signal
@@ -19,45 +18,14 @@ from PySide6.QtWidgets import (
 )
 
 from app import config
-from app.core.tiktok_client import PRIVACY_LABELS, VIDEO_FILE_FILTER, TikTokClient, refresh_access_token
+from app.core.tiktok_client import PRIVACY_LABELS, VIDEO_FILE_FILTER, TikTokClient
 from app.storage import history_store
 from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import arrange_cards
 from app.workers.async_worker import Worker
 
 
-def _ensure_valid_token(on_progress=None) -> str:
-    """Returns a still-valid TikTok access token, refreshing it first if it's expired or
-    about to expire. Runs inside a worker thread — talks to config (keyring/JSON) directly,
-    same pattern as the *_client modules that read config from their owning UI tab."""
-    account = config.get_tiktok_account()
-    access_token = account.get("access_token", "")
-    if not access_token:
-        raise ValueError("Chưa kết nối TikTok — vào tab 'Kết nối TikTok' trước.")
-
-    expires_at = account.get("token_expires_at", 0) or 0
-    if time.time() < expires_at - 300:  # still valid for 5+ more minutes
-        return access_token
-
-    if on_progress:
-        on_progress("Access token TikTok sắp hết hạn, đang làm mới...")
-    settings = config.load_settings()
-    client_key = settings.get("tiktok_client_key", "")
-    client_secret = config.get_secret("tiktok_client_secret")
-    refresh_token = account.get("refresh_token", "")
-    if not client_key or not client_secret or not refresh_token:
-        raise ValueError("Token TikTok đã hết hạn — vào tab 'Kết nối TikTok' để đăng nhập lại.")
-
-    tokens = refresh_access_token(client_key, client_secret, refresh_token)
-    config.save_tiktok_account(
-        display_name=account.get("display_name", ""),
-        open_id=account.get("open_id", ""),
-        avatar_url=account.get("avatar_url", ""),
-        access_token=tokens["access_token"],
-        refresh_token=tokens.get("refresh_token") or refresh_token,
-        expires_at=tokens.get("expires_at", 0),
-    )
-    return tokens["access_token"]
+from app.core.social_tokens import ensure_tiktok_token as _ensure_valid_token
 
 
 class TikTokTab(QWidget):

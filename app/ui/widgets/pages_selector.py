@@ -6,7 +6,7 @@ row_list.py for why that avoids clipped text and stray empty space.
 """
 from __future__ import annotations
 
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app import config
 from app.ui.widgets.row_list import RowListWidget
@@ -22,11 +22,11 @@ class PagesSelectorWidget(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(10)
 
-        header_row = QHBoxLayout()
+        header_row = QGridLayout()
+        header_row.setSpacing(8)
         layout.addWidget(QLabel("Đăng lên Page nào:"))
-        header_row.addStretch(1)
         select_all_btn = QPushButton("Chọn tất cả")
         select_all_btn.setObjectName("linkButton")
         select_all_btn.clicked.connect(lambda: self._set_all_checked(True))
@@ -36,9 +36,9 @@ class PagesSelectorWidget(QWidget):
         refresh_btn = QPushButton("Làm mới")
         refresh_btn.setObjectName("linkButton")
         refresh_btn.clicked.connect(self.refresh)
-        header_row.addWidget(select_all_btn)
-        header_row.addWidget(select_none_btn)
-        header_row.addWidget(refresh_btn)
+        header_row.addWidget(select_all_btn, 0, 0)
+        header_row.addWidget(select_none_btn, 0, 1)
+        header_row.addWidget(refresh_btn, 1, 0, 1, 2)
         layout.addLayout(header_row)
 
         self.row_list = RowListWidget(height=130)
@@ -60,11 +60,16 @@ class PagesSelectorWidget(QWidget):
         for page in pages:
             page_id = page.get("id")
             page_name = page.get("name") or page_id
-            checkbox = QCheckBox(f"{page_name}   ·   ID: {page_id}")
+            checkbox = QCheckBox(page_name)
+            checkbox.setToolTip(f"{page_name}\nID: {page_id}")
             checkbox.setObjectName("pageCheckRow")
             checkbox.setChecked(page_id in checked_ids if checked_ids else True)
             self._checkboxes[page_id] = checkbox
             self.row_list.add_row(checkbox)
+
+    def set_selected_ids(self, ids) -> None:
+        for page_id, checkbox in self._checkboxes.items():
+            checkbox.setChecked(page_id in ids)
 
     def _set_all_checked(self, checked: bool) -> None:
         for checkbox in self._checkboxes.values():

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 
 from app.ui.widgets.log_console import LogConsole
 from app.ui.widgets.page_header import make_page_header
+from app.ui.widgets.liquid_glass import GlassCard
 
 
 class LogTab(QWidget):
@@ -33,10 +34,10 @@ class LogTab(QWidget):
         header_row.addWidget(self.clear_btn, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header_row)
 
-        console_wrapper = QWidget()
+        console_wrapper = GlassCard()
         console_wrapper.setObjectName("logWrapper")
         console_layout = QVBoxLayout(console_wrapper)
-        console_layout.setContentsMargins(0, 0, 0, 0)
+        console_layout.setContentsMargins(8, 8, 8, 8)
         console_layout.setSpacing(0)
 
         console_header = QLabel("●  NHẬT KÝ PHIÊN LÀM VIỆC")

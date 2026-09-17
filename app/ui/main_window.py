@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from PySide6.QtCore import QDate, QSize, Qt, QTimer
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QLineEdit,
+    QMenu,
+    QCompleter,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -15,6 +19,8 @@ from PySide6.QtWidgets import (
 )
 
 from app import config
+from app.core.windows_acrylic import disable_window_blur, enable_window_blur
+from app.ui.theme import appearance_options, apply_theme, is_light_appearance, native_glass_tint
 from app.storage import history_store
 from app.ui.automation_tab import AutomationTab
 from app.ui.automation_settings_dialog import AutomationSettingsTab
@@ -33,6 +39,8 @@ from app.ui.youtube_connect_tab import YouTubeConnectTab
 from app.ui.youtube_tab import YouTubeTab
 from app.ui.widgets.design import compact_labels, line_icon
 from app.ui.widgets.toast import Toast
+from app.ui.widgets.glass_chrome import GlassTitleBar
+from app.ui.widgets.liquid_glass import apply_button_elevation
 
 # Each entry is either ("header", label) or ("item", label, key).
 NAV_ENTRIES = [
@@ -56,15 +64,9 @@ NAV_ENTRIES = [
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("")
-        self.setWindowFlags(
-            Qt.WindowType.Window
-            | Qt.WindowType.CustomizeWindowHint
-            | Qt.WindowType.WindowTitleHint
-            | Qt.WindowType.WindowMinimizeButtonHint
-            | Qt.WindowType.WindowMaximizeButtonHint
-            | Qt.WindowType.WindowCloseButtonHint
-        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setWindowTitle("Claude Content Studio")
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.resize(1240, 840)
         self.setMinimumSize(980, 680)
 
@@ -93,35 +95,41 @@ class MainWindow(QMainWindow):
         self.toast = Toast(self)
         self._wire_signals()
         self._show_page("dashboard")
+        self._appearance = appearance_options(config.load_settings())
+        self.apply_appearance(self._appearance)
 
     def _build_ui(self) -> None:
         central = QWidget()
         central.setObjectName("centralArea")
-        root_layout = QHBoxLayout(central)
-        root_layout.setContentsMargins(16, 16, 16, 16)
-        root_layout.setSpacing(0)
-
-        root_layout.addWidget(self._build_sidebar())
-        root_layout.addWidget(self._build_content_area(), stretch=1)
+        central.setProperty("glassFallback", True)
+        root_layout = QVBoxLayout(central)
+        root_layout.setContentsMargins(20, 18, 20, 20)
+        root_layout.setSpacing(14)
+        root_layout.addWidget(GlassTitleBar(self))
+        body = QHBoxLayout()
+        body.setSpacing(18)
+        body.addWidget(self._build_sidebar())
+        body.addWidget(self._build_content_area(), 1)
+        root_layout.addLayout(body, 1)
 
         self.setCentralWidget(central)
 
     def _build_sidebar(self) -> QWidget:
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(82)
+        sidebar.setFixedWidth(64)
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(12, 14, 12, 14)
-        layout.setSpacing(8)
+        layout.setContentsMargins(8, 10, 8, 10)
+        layout.setSpacing(4)
         self.group_btn = self._icon_button("group", "Thu gọn / mở nhóm chức năng")
         self.group_btn.setCheckable(True)
         self.group_btn.setChecked(True)
         layout.addWidget(self.group_btn, 0, Qt.AlignmentFlag.AlignHCenter)
-        layout.addSpacing(20)
+        layout.addSpacing(8)
         self.nav_group = QWidget()
         nav_layout = QVBoxLayout(self.nav_group)
         nav_layout.setContentsMargins(0, 0, 0, 0)
-        nav_layout.setSpacing(6)
+        nav_layout.setSpacing(3)
         self.nav_buttons = {}
         for kind, label, *keys in NAV_ENTRIES:
             if kind != "item":
@@ -132,9 +140,15 @@ class MainWindow(QMainWindow):
             button.clicked.connect(lambda checked=False, k=key: self._show_page(k))
             self.nav_buttons[key] = button
             nav_layout.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
-        layout.addWidget(self.nav_group)
-        self.group_btn.toggled.connect(self.nav_group.setVisible)
-        layout.addStretch(1)
+        nav_layout.addStretch(1)
+        self.nav_scroll = QScrollArea()
+        self.nav_scroll.setObjectName("navScroll")
+        self.nav_scroll.setWidgetResizable(True)
+        self.nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.nav_scroll.setMinimumHeight(60)
+        self.nav_scroll.setWidget(self.nav_group)
+        layout.addWidget(self.nav_scroll, 1)
+        self.group_btn.toggled.connect(self.nav_scroll.setVisible)
         self.settings_btn = self._icon_button("settings", "Cài đặt")
         self.settings_btn.setCheckable(True)
         self.settings_btn.clicked.connect(lambda: self._show_page("settings"))
@@ -145,9 +159,10 @@ class MainWindow(QMainWindow):
     def _icon_button(self, key: str, label: str) -> QPushButton:
         button = QPushButton()
         button.setObjectName("railButton")
+        button.setProperty("iconName", key)
         button.setIcon(line_icon(key))
-        button.setIconSize(QSize(24, 24))
-        button.setFixedSize(46, 46)
+        button.setIconSize(QSize(18, 18))
+        button.setFixedSize(34, 34)
         button.setToolTip(label)
         button.setAccessibleName(label)
         return button
@@ -182,12 +197,45 @@ class MainWindow(QMainWindow):
         wrapper = QWidget()
         wrapper.setObjectName("contentShell")
         wrapper_layout = QVBoxLayout(wrapper)
-        wrapper_layout.setContentsMargins(28, 20, 28, 24)
-        wrapper_layout.setSpacing(24)
+        wrapper_layout.setContentsMargins(20, 16, 20, 20)
+        wrapper_layout.setSpacing(18)
         toolbar = QHBoxLayout()
-        context = QLabel("Không gian làm việc\nPhiên cục bộ")
-        context.setObjectName("workspaceBadge")
-        toolbar.addWidget(context)
+        toolbar.setSpacing(7)
+        self.page_labels = {entry[2]: entry[1].split("  ", 1)[-1] for entry in NAV_ENTRIES if entry[0] == "item"}
+        self.page_labels.update(settings="Cài đặt", automation_settings="Cài đặt tự động hoá")
+        self.tool_search = QLineEdit()
+        self.tool_search.setObjectName("toolSearch")
+        self.tool_search.setPlaceholderText("Tìm công cụ…")
+        self.tool_search.setFixedWidth(158)
+        self.tool_search.setClearButtonEnabled(True)
+        self.search_action = self.tool_search.addAction(line_icon("search"), QLineEdit.ActionPosition.LeadingPosition)
+        completer = QCompleter(list(self.page_labels.values()), self.tool_search)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.tool_search.setCompleter(completer)
+        completer.popup().setObjectName("toolSearchPopup")
+        completer.activated.connect(self._open_search_result)
+        self.tool_search.returnPressed.connect(lambda: self._open_search_result(self.tool_search.text()))
+        toolbar.addWidget(self.tool_search)
+        self.shortcut_buttons = {}
+        for key, label in [("dashboard", "Tổng quan"), ("content", "Content"), ("image", "Hình ảnh"), ("video", "Video")]:
+            button = QPushButton(label)
+            button.setObjectName("topTab")
+            button.setCheckable(True)
+            button.clicked.connect(lambda checked=False, k=key: self._show_page(k))
+            toolbar.addWidget(button)
+            self.shortcut_buttons[key] = button
+        self.more_button = QPushButton("Thêm")
+        self.more_button.setObjectName("topTab")
+        self.more_button.setCheckable(True)
+        menu = QMenu(self.more_button)
+        for key, label in self.page_labels.items():
+            if key not in self.shortcut_buttons:
+                action = menu.addAction(line_icon(key if key != "automation_settings" else "settings"), label)
+                action.setData(key)
+                action.triggered.connect(lambda checked=False, k=key: self._show_page(k))
+        self.more_button.setMenu(menu)
+        toolbar.addWidget(self.more_button)
         toolbar.addStretch(1)
         self.date_label = QLabel()
         self.date_label.setObjectName("toolbarDate")
@@ -196,31 +244,30 @@ class MainWindow(QMainWindow):
         self.date_timer.timeout.connect(self._refresh_date)
         self.date_timer.start(60000)
         toolbar.addWidget(self.date_label)
-        toolbar.addStretch(1)
         logs_button = self._icon_button("logs", "Nhật ký hoạt động")
         logs_button.clicked.connect(lambda: self._show_page("logs"))
         toolbar.addWidget(logs_button)
+        profile = self._icon_button("user", "Cài đặt tài khoản và ứng dụng")
+        profile.setObjectName("profileButton")
+        profile.clicked.connect(lambda: self._show_page("settings"))
+        toolbar.addWidget(profile)
         wrapper_layout.addLayout(toolbar)
         wrapper_layout.addWidget(self.stack, 1)
-        shortcuts = QHBoxLayout()
-        shortcuts.setSpacing(14)
-        self.shortcut_buttons = {}
-        for number, (key, label) in enumerate([
-            ("content", "Viết Content"), ("image", "Tạo Ảnh"), ("video", "Tạo Video"),
-            ("facebook", "Đăng Facebook"), ("automation", "Tự động hoá"),
-        ], 1):
-            button = QPushButton(f"{number:02d}\n\n{label}")
-            button.setObjectName("shortcutCard")
-            button.setCheckable(True)
-            button.setFixedHeight(98)
-            button.clicked.connect(lambda checked=False, k=key: self._show_page(k))
-            shortcuts.addWidget(button, 1)
-            self.shortcut_buttons[key] = button
-        wrapper_layout.addLayout(shortcuts)
         return wrapper
 
     def _refresh_date(self) -> None:
-        self.date_label.setText(QDate.currentDate().toString("dd / MM\nyyyy"))
+        self.date_label.setText(QDate.currentDate().toString("dd / MM"))
+
+    def _open_search_result(self, text: str) -> None:
+        query = text.strip().casefold()
+        if not query:
+            return
+        matches = [key for key, label in self.page_labels.items() if query == label.casefold()]
+        if not matches:
+            matches = [key for key, label in self.page_labels.items() if query in label.casefold()]
+        if matches:
+            self._show_page(matches[0])
+            self.tool_search.clear()
 
     def _show_page(self, key: str) -> None:
         self.stack.setCurrentIndex(self._page_stack_index[key])
@@ -231,11 +278,16 @@ class MainWindow(QMainWindow):
         for name, button in {**self.nav_buttons, "settings": self.settings_btn}.items():
             active = name == key or (name == "settings" and key == "automation_settings")
             button.setChecked(active)
-            button.setIcon(line_icon(name, "#2dbac5" if active else "#89949e"))
+            crystal = QApplication.instance().property("glassStyle") == "crystal"
+            color = ("#167d9e" if active else "#40586b") if crystal else ("#ffffff" if active else "#deded9")
+            button.setIcon(line_icon(name, color))
+        self.more_button.setChecked(key not in self.shortcut_buttons)
         for name, button in self.shortcut_buttons.items():
             button.setChecked(name == key)
 
     def _wire_signals(self) -> None:
+        self.settings_tab.appearance_panel.appearance_changed.connect(self.apply_appearance)
+        self.dashboard_tab.page_requested.connect(self._show_page)
         self.automation_tab.settings_requested.connect(lambda: self._show_page("automation_settings"))
         self.content_tab.use_for_image.connect(self.image_tab.set_context_from_content)
         self.content_tab.use_for_video.connect(self.video_tab.set_context_from_content)
@@ -276,6 +328,55 @@ class MainWindow(QMainWindow):
         """Keep the activity log and visible feedback in sync."""
         self.log_console.log(message, level)
         self.toast.show_message(message, level)
+
+    def apply_appearance(self, options) -> None:
+        self._appearance = appearance_options(options)
+        app = QApplication.instance()
+        if app:
+            apply_theme(app, self._appearance)
+        apply_button_elevation(self)
+        self._refresh_theme_icons()
+        self._refresh_glass()
+
+    def _refresh_theme_icons(self) -> None:
+        crystal = is_light_appearance(self._appearance)
+        for button in self.findChildren(QPushButton):
+            name = button.property("iconName")
+            if name:
+                color = ("#167d9e" if button.isChecked() else "#40586b") if crystal else ("#ffffff" if button.isChecked() else "#deded9")
+                if button.objectName() == "quickTool":
+                    colors = {"content": "#b56832", "image": "#19799b", "video": "#6573a5"} if crystal else {"content": "#e4bd9a", "image": "#a8cde2", "video": "#c5b3db"}
+                    color = colors[name]
+                button.setIcon(line_icon(name, color))
+        self.search_action.setIcon(line_icon("search", "#40586b" if crystal else "#deded9"))
+        for action in self.more_button.menu().actions():
+            name = action.data()
+            action.setIcon(line_icon("settings" if name == "automation_settings" else name, "#40586b" if crystal else "#deded9"))
+
+    def _refresh_glass(self) -> None:
+        app = QApplication.instance()
+        if self.isVisible() and app and app.platformName() == "windows":
+            # Native Acrylic also covers empty gutters; enable it only by opt-in.
+            if self._appearance["glass_blur"]:
+                enable_window_blur(int(self.winId()), *native_glass_tint(self._appearance))
+            else:
+                disable_window_blur(int(self.winId()))
+        central = self.centralWidget()
+        central.setProperty("glassFallback", True)
+        central.style().unpolish(central)
+        central.style().polish(central)
+        central.update()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self._refresh_glass)
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if hasattr(self, "_appearance"):
+            from PySide6.QtCore import QEvent
+            if event.type() == QEvent.Type.WindowStateChange:
+                QTimer.singleShot(0, self._refresh_glass)
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)

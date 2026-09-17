@@ -1,0 +1,8 @@
+# Direct dependencies pinned to the versions verified in this workspace.
+PySide6==6.11.2
+anthropic==1.4.0
+openai==3.10.0
+requests==2.34.2
+keyring==25.7.0
+pymongo==4.18.0
+SecretStorage==3.5.0

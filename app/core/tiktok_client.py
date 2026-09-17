@@ -329,4 +329,4 @@ class TikTokClient:
         self.upload_video_chunks(upload_url, video_path, chunk_size, total_chunk_count, on_progress=on_progress)
         if on_progress:
             on_progress("Đã tải video xong, đang chờ TikTok xử lý...")
-        return self.wait_for_publish(publish_id, on_progress=on_progress)
+        return {**self.wait_for_publish(publish_id, on_progress=on_progress), "publish_id": publish_id}

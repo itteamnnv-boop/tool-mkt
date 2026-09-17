@@ -12,7 +12,7 @@ def make_page_header(title: str, subtitle: str = "") -> QWidget:
     wrapper.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
     layout = QVBoxLayout(wrapper)
     layout.setContentsMargins(0, 0, 0, 8)
-    layout.setSpacing(5)
+    layout.setSpacing(8)
 
     title_label = QLabel(title.split(" ", 1)[-1] if not title[0].isalnum() else title)
     title_label.setObjectName("pageHeader")

@@ -7,7 +7,7 @@ from app.storage import history_store
 
 from app.core.content_prompts import (
     SYSTEM_PROMPT_IMAGE_PROMPT,
-    SYSTEM_PROMPT_POST,
+    get_post_system_prompt,
     SYSTEM_PROMPT_VIDEO_SCRIPT,
     SYSTEM_PROMPT_VIDEO_SCRIPT_FROM_REFERENCE,
     build_image_prompt_user_prompt,
@@ -45,9 +45,10 @@ class OpenAIContentClient:
         length: str = "trung bình (80-150 từ)",
         audience: str = "khách hàng đại chúng",
         include_hashtags: bool = True,
+        system_prompt: str | None = None,
     ) -> str:
         user_prompt = build_post_user_prompt(topic, tone, length, audience, include_hashtags)
-        return self._complete(SYSTEM_PROMPT_POST, user_prompt, operation="content")
+        return self._complete(get_post_system_prompt() if system_prompt is None else system_prompt, user_prompt, operation="content")
 
     def suggest_image_prompt(self, content_text: str) -> str:
         return self._complete(

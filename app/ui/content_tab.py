@@ -19,9 +19,12 @@ from PySide6.QtWidgets import (
 
 from app import config
 from app.core.text_provider import PROVIDER_CLAUDE, PROVIDER_LABELS, PROVIDER_OPENAI, get_text_client
+from app.core.content_prompts import get_post_system_prompt
 from app.storage import history_store
 from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import arrange_cards
+from app.ui.widgets.liquid_glass import GlassCard
+from app.ui.widgets.post_prompt_editor import PostPromptEditor
 from app.workers.async_worker import Worker
 
 
@@ -34,6 +37,7 @@ class ContentTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker: Worker | None = None
+        self._generating = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -91,6 +95,11 @@ class ContentTab(QWidget):
         count_row.addStretch(1)
         layout.addLayout(count_row)
 
+        self.prompt_editor = PostPromptEditor()
+        self.prompt_editor.log_message.connect(self.log_message.emit)
+        self.prompt_editor.busy_changed.connect(self._on_prompt_busy)
+        layout.addWidget(self.prompt_editor)
+
         self.generate_btn = QPushButton("Viết content")
         self.generate_btn.setObjectName("primaryButton")
         self.generate_btn.clicked.connect(self._on_generate)
@@ -124,12 +133,20 @@ class ContentTab(QWidget):
             actions.addWidget(b)
         layout.addLayout(actions)
         self.result_text.setPlaceholderText("Nội dung được tạo sẽ xuất hiện ở đây. Bạn có thể chỉnh sửa trước khi sử dụng.")
-        arrange_cards(layout, [("Thông tin bài viết", list(range(8))), ("Bản thảo", [8, 9, 10, 11])])
+        arrange_cards(layout, [("Thông tin bài viết", list(range(9))), ("Bản thảo", [9, 10, 11, 12])])
+
+    def _on_prompt_busy(self, busy: bool) -> None:
+        self.generate_btn.setEnabled(not busy and not self._generating)
 
     def _on_count_changed(self, value: int) -> None:
         self.generate_btn.setText("Viết content" if value <= 1 else f"Viết {value} content")
 
     def _on_generate(self) -> None:
+        if self.prompt_editor.busy or self._generating:
+            return
+        if self.prompt_editor.dirty:
+            self.log_message.emit("Lưu prompt đã chỉnh vào DB trước khi viết content.", "error")
+            return
         topic = self.topic_input.text().strip()
         if not topic:
             self.log_message.emit("Vui lòng nhập chủ đề bài đăng.", "error")
@@ -156,6 +173,8 @@ class ContentTab(QWidget):
         )
 
         self.generate_btn.setEnabled(False)
+        self._generating = True
+        self.prompt_editor.setEnabled(False)
         self._clear_variants()
 
         if count <= 1:
@@ -172,6 +191,7 @@ class ContentTab(QWidget):
 
     @staticmethod
     def _generate_batch(client, count: int, on_progress=None, **kwargs) -> list[str]:
+        kwargs["system_prompt"] = get_post_system_prompt()
         results = []
         for i in range(count):
             if on_progress:
@@ -180,6 +200,8 @@ class ContentTab(QWidget):
         return results
 
     def _on_done(self, topic: str, texts: list[str]) -> None:
+        self._generating = False
+        self.prompt_editor.setEnabled(True)
         self.generate_btn.setEnabled(True)
         for text in texts:
             history_store.add_content(topic, text)
@@ -194,6 +216,8 @@ class ContentTab(QWidget):
             self.log_message.emit("Đã tạo content xong.", "success")
 
     def _on_error(self, message: str) -> None:
+        self._generating = False
+        self.prompt_editor.setEnabled(True)
         self.generate_btn.setEnabled(True)
         self.log_message.emit(f"Lỗi tạo content: {message}", "error")
 
@@ -208,13 +232,13 @@ class ContentTab(QWidget):
     def _populate_variants(self, texts: list[str]) -> None:
         self._clear_variants()
         for index, text in enumerate(texts, start=1):
-            card = QWidget()
+            card = GlassCard()
             card.setObjectName("card")
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(12, 10, 12, 12)
+            card_layout.setContentsMargins(16, 16, 16, 18)
             card_layout.setSpacing(6)
             title = QLabel(f"Phiên bản {index}")
-            title.setObjectName("cardTitle")
+            title.setObjectName("sectionTitle")
             card_layout.addWidget(title)
             preview = QTextEdit()
             preview.setPlainText(text)

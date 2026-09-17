@@ -1,4 +1,4 @@
-"""Shared layout and vector icons for the charcoal/cyan workspace."""
+"""Shared layout and vector icons for the frosted neutral glass workspace."""
 from __future__ import annotations
 
 from PySide6.QtCore import QByteArray, Qt
@@ -7,8 +7,13 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QHBoxLayout, QLabel, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
 )
+from app.ui.widgets.liquid_glass import GlassCard
 
 _PATHS = {
+    "minimize": '<path d="M5 12h14"/>',
+    "maximize": '<rect x="5" y="5" width="14" height="14" rx="2"/>',
+    "close": '<path d="m6 6 12 12M18 6 6 18"/>',
+    "search": '<circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/>',
     "dashboard": '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M7 16v-3M12 16V8M17 16v-5"/>',
     "content": '<path d="M4 4h11v16H4zM8 8h4M8 12h4M8 16h3M17 5l3 3-5 5-3 1 1-3z"/>',
     "image": '<rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1.5"/><path d="m4 17 5-5 4 4 3-3 4 4"/>',
@@ -29,7 +34,7 @@ _PATHS = {
 }
 
 
-def line_icon(name: str, color: str = "#89949e") -> QIcon:
+def line_icon(name: str, color: str = "#deded9") -> QIcon:
     svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" '
            f'viewBox="0 0 24 24"><g fill="none" stroke="{color}" stroke-width="1.5" '
            f'stroke-linecap="round" stroke-linejoin="round">{_PATHS[name]}</g></svg>')
@@ -43,7 +48,7 @@ def line_icon(name: str, color: str = "#89949e") -> QIcon:
 
 
 def card(title: str) -> tuple[QWidget, QVBoxLayout]:
-    panel = QWidget()
+    panel = GlassCard()
     panel.setObjectName("card")
     outer = QVBoxLayout(panel)
     outer.setContentsMargins(0, 0, 0, 0)
@@ -54,8 +59,8 @@ def card(title: str) -> tuple[QWidget, QVBoxLayout]:
     outer.addWidget(heading)
     body = QWidget()
     content = QVBoxLayout(body)
-    content.setContentsMargins(18, 16, 18, 18)
-    content.setSpacing(8)
+    content.setContentsMargins(20, 10, 20, 20)
+    content.setSpacing(12)
     outer.addWidget(body, 1)
     return panel, content
 
@@ -117,8 +122,10 @@ def compact_labels(widget: QWidget) -> None:
             label.setWordWrap(True)
         label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
     for form in widget.findChildren(QFormLayout):
+        form.setVerticalSpacing(10)
+        form.setHorizontalSpacing(12)
         if form.rowWrapPolicy() == QFormLayout.RowWrapPolicy.WrapAllRows:
             for row in range(form.rowCount()):
                 item = form.itemAt(row, QFormLayout.ItemRole.LabelRole)
                 if item and isinstance(item.widget(), QLabel):
-                    item.widget().setWordWrap(False)
+                    item.widget().setWordWrap(True)

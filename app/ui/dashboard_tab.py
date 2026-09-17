@@ -1,6 +1,10 @@
 """Production dashboard backed by the local activity history."""
 from __future__ import annotations
 
+from PySide6.QtCore import Signal, Qt
+from app.ui.widgets.design import line_icon
+from app.ui.widgets.studio_hero import StudioHero
+from app.ui.widgets.liquid_glass import GlassCard
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from app.storage import history_store
@@ -8,6 +12,8 @@ from app.ui.widgets.page_header import make_page_header
 
 
 class DashboardTab(QWidget):
+    page_requested = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._build_ui()
@@ -24,26 +30,88 @@ class DashboardTab(QWidget):
         self.refresh_btn.clicked.connect(self.refresh)
         header.addWidget(self.refresh_btn)
         layout.addLayout(header)
+        featured = QHBoxLayout()
+        featured.setSpacing(16)
+        quick_panel = GlassCard()
+        quick_panel.setObjectName("quickPanel")
+        quick_panel.setFixedWidth(218)
+        quick = QVBoxLayout(quick_panel)
+        quick.setContentsMargins(18, 18, 18, 18)
+        quick.setSpacing(10)
+        quick_title = QLabel("Không gian sáng tạo")
+        quick_title.setObjectName("sectionTitle")
+        quick.addWidget(quick_title)
+        for key, label, description in [("content", "Viết Content", "Ý tưởng thành bài viết"), ("image", "Tạo hình ảnh", "Hình ảnh từ mô tả"), ("video", "Tạo Video", "Kể câu chuyện của bạn")]:
+            button = QPushButton(label + "\n" + description)
+            button.setObjectName("quickTool")
+            button.setProperty("iconName", key)
+            button.setIcon(line_icon(key, {"content": "#e4bd9a", "image": "#a8cde2", "video": "#c5b3db"}[key]))
+            button.setMinimumHeight(52)
+            button.clicked.connect(lambda checked=False, k=key: self.page_requested.emit(k))
+            quick.addWidget(button)
+        quick.addStretch(1)
+        featured.addWidget(quick_panel)
+        hero = StudioHero()
+        hero.setObjectName("studioHero")
+        hero.setMinimumHeight(260)
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(24, 22, 24, 22)
+        hero_layout.setSpacing(10)
+        eyebrow = QLabel("CONTENT · IMAGE · VIDEO")
+        eyebrow.setObjectName("heroEyebrow")
+        hero_layout.addWidget(eyebrow)
+        hero_layout.addStretch(1)
+        hero_title = QLabel("Biến ý tưởng\nthành câu chuyện.")
+        hero_title.setObjectName("heroTitle")
+        hero_layout.addWidget(hero_title)
+        description = QLabel("Sáng tạo nội dung, hình ảnh và video trong cùng một không gian.")
+        description.setObjectName("heroDescription")
+        description.setWordWrap(True)
+        description.setMaximumWidth(390)
+        hero_layout.addWidget(description)
+        actions = QHBoxLayout()
+        start = QPushButton("▶  Bắt đầu sáng tạo")
+        start.setObjectName("primaryButton")
+        start.clicked.connect(lambda: self.page_requested.emit("content"))
+        collection = QPushButton("Bộ sưu tập  ↗")
+        collection.clicked.connect(lambda: self.page_requested.emit("gallery"))
+        actions.addWidget(start)
+        actions.addWidget(collection)
+        actions.addStretch(1)
+        hero_layout.addLayout(actions)
+        featured.addWidget(hero, 1)
+        layout.addLayout(featured)
+        section = QLabel("Hoạt động của bạn")
+        section.setObjectName("sectionTitle")
+        layout.addWidget(section)
         grid = QGridLayout()
         grid.setSpacing(14)
         self.cards: dict[str, tuple[QLabel, QLabel]] = {}
         for index, (key, title) in enumerate((("contents", "Content đã tạo"), ("images", "Hình ảnh đã tạo"), ("videos", "Video đã tạo"), ("posts", "Bài viết đăng thành công"))):
-            panel = QWidget()
+            panel = GlassCard()
             panel.setObjectName("metricCard")
+            panel.setProperty("metric", key)
             panel_layout = QVBoxLayout(panel)
+            panel_layout.setContentsMargins(20, 16, 20, 18)
+            panel_layout.setSpacing(8)
+            panel.setMinimumHeight(140)
             title_label, value, today = QLabel(title), QLabel("0"), QLabel("Hôm nay: 0")
             title_label.setObjectName("metricTitle")
+            title_label.setMinimumHeight(32)
+            title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             value.setObjectName("metricValue")
             today.setObjectName("metricToday")
             panel_layout.addWidget(title_label)
             panel_layout.addWidget(value)
             panel_layout.addWidget(today)
-            grid.addWidget(panel, index // 2, index % 2)
+            grid.addWidget(panel, 0, index)
             self.cards[key] = (value, today)
         layout.addLayout(grid)
-        token_panel = QWidget()
+        token_panel = GlassCard()
         token_panel.setObjectName("metricCard")
         token_layout = QHBoxLayout(token_panel)
+        token_layout.setContentsMargins(20, 16, 20, 18)
+        token_layout.setSpacing(16)
         self.token_total = QLabel("0 token")
         self.token_total.setObjectName("tokenTotal")
         self.token_detail = QLabel()
@@ -58,9 +126,11 @@ class DashboardTab(QWidget):
         self.provider_table.setObjectName("dashboardTable")
         self.provider_table.setHorizontalHeaderLabels(["Nhà cung cấp", "Model", "Input", "Output"])
         self.provider_table.verticalHeader().setVisible(False)
+        self.provider_table.verticalHeader().setDefaultSectionSize(40)
         self.provider_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.provider_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self.provider_table.horizontalHeader().setStretchLastSection(True)
+        self.provider_table.setMinimumHeight(130)
         layout.addWidget(self.provider_table, 1)
 
     def refresh(self) -> None:

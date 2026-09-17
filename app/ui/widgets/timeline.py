@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from app.ui.widgets.liquid_glass import GlassCard
 
 STATUS_PENDING = "pending"
 STATUS_ACTIVE = "active"
@@ -22,15 +23,14 @@ _CIRCLE_STYLE = {
 }
 
 
-class TimelineStep(QWidget):
+class TimelineStep(GlassCard):
     def __init__(self, index: int, title: str, is_last: bool = False, parent=None):
         super().__init__(parent)
         self.setObjectName("timelineStep")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._index = index
 
         outer = QHBoxLayout(self)
-        outer.setContentsMargins(14, 14, 14, 14)
+        outer.setContentsMargins(16, 16, 16, 18)
         outer.setSpacing(12)
 
         rail = QVBoxLayout()
@@ -53,7 +53,7 @@ class TimelineStep(QWidget):
 
         content_widget = QWidget()
         self.content_layout = QVBoxLayout(content_widget)
-        self.content_layout.setContentsMargins(0, 2, 0, 18)
+        self.content_layout.setContentsMargins(0, 2, 0, 0)
         self.content_layout.setSpacing(4)
 
         self.title_label = QLabel(title)

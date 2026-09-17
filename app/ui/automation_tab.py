@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
+from copy import deepcopy
 
 import requests
 from PySide6.QtCore import QDateTime, Qt, Signal
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import config
-from app.core.facebook_client import post_to_pages
+from app.core.automation_publisher import configured_pages, publish_generated, selected_platforms, validate_destinations, PLATFORM_LABELS
 from app.core.heygen_client import HeyGenClient
 from app.core.image_client import ImageClient
 from app.core.text_provider import PROVIDER_LABELS, get_text_client
@@ -55,6 +56,10 @@ class AutomationTab(QWidget):
         self._image_path: Path | None = None
         self._video_path: Path | None = None
         self._active_step = None
+        self._run_settings = None
+        self._run_pages = []
+        self._run_topic = ""
+        self._published_targets = set()
         self._build_ui()
         self.processing_dialog = ProcessingDialog(self)
 
@@ -133,9 +138,12 @@ class AutomationTab(QWidget):
 
         self.pages_selector = PagesSelectorWidget()
         wl.addWidget(self.pages_selector)
+        self.destinations_label = QLabel("Nền tảng và quyền riêng tư lấy từ Cài đặt quy trình.")
+        self.destinations_label.setWordWrap(True)
+        wl.addWidget(self.destinations_label)
 
         schedule_row = QVBoxLayout()
-        self.schedule_check = QCheckBox("Lên lịch đăng thay vì đăng ngay")
+        self.schedule_check = QCheckBox("Lên lịch Facebook")
         self.schedule_check.toggled.connect(lambda checked: self.schedule_datetime.setEnabled(checked))
         schedule_row.addWidget(self.schedule_check)
         self.schedule_datetime = QDateTimeEdit(QDateTime.currentDateTime().addSecs(3600))
@@ -168,6 +176,26 @@ class AutomationTab(QWidget):
             return
 
         settings = config.load_settings()
+        platforms = selected_platforms(settings)
+        if any(key in platforms for key in ("tiktok", "youtube")) and settings.get("automation_attachment") != ATTACHMENT_VIDEO:
+            self.log_message.emit("TikTok và YouTube cần đính kèm Video trong Cài đặt quy trình.", "error")
+            return
+        self._run_pages = configured_pages(settings) if "facebook" in platforms else []
+        if settings.get("automation_auto_post", False):
+            try:
+                validate_destinations(settings, self._run_pages)
+            except ValueError as exc:
+                self.log_message.emit(str(exc), "error")
+                return
+        self._run_settings = deepcopy(settings)
+        self._run_topic = idea
+        self._published_targets.clear()
+        self.pages_selector.refresh()
+        self.pages_selector.set_selected_ids(settings.get("automation_facebook_page_ids", []))
+        self.pages_selector.setVisible("facebook" in platforms)
+        self.schedule_check.setVisible("facebook" in platforms)
+        self.schedule_datetime.setVisible("facebook" in platforms)
+        self.destinations_label.setText("Đăng lên: " + ", ".join(PLATFORM_LABELS[key] for key in platforms))
         provider = settings.get("content_provider", "claude")
         tone = settings.get("automation_tone", "thân thiện, chuyên nghiệp")
         include_hashtags = bool(settings.get("automation_hashtags", True))
@@ -341,10 +369,9 @@ class AutomationTab(QWidget):
         self._finish_pipeline()
 
     def _finish_pipeline(self) -> None:
-        self.run_btn.setEnabled(True)
         self.post_btn.setEnabled(True)
 
-        if bool(config.load_settings().get("automation_auto_post", False)):
+        if bool((self._run_settings or {}).get("automation_auto_post", False)):
             self.post_step.set_status(STATUS_ACTIVE, "Đã bật tự động đăng ngay — đang đăng bài, bỏ qua bước duyệt...")
             self.processing_dialog.set_status("Đã tạo xong nội dung — đang tự động đăng bài...")
             self.log_message.emit(
@@ -353,7 +380,8 @@ class AutomationTab(QWidget):
             self._on_post(auto=True)
             return
 
-        self.post_step.set_status(STATUS_ACTIVE, "Xem lại nội dung bên trên rồi chọn Page và bấm Đăng bài.")
+        self.run_btn.setEnabled(True)
+        self.post_step.set_status(STATUS_ACTIVE, "Xem lại nội dung rồi bấm Đăng bài theo cấu hình của lần chạy.")
         self.processing_dialog.finish("Đã tạo xong nội dung — xem lại và bấm Đăng bài khi sẵn sàng.")
         self.log_message.emit("Quy trình tự động hoàn tất, sẵn sàng đăng bài.", "success")
 
@@ -368,98 +396,95 @@ class AutomationTab(QWidget):
 
     def _on_post(self, auto: bool = False) -> None:
         message = self.review_text.toPlainText().strip()
-        settings = config.load_settings()
-        attachment = settings.get("automation_attachment", ATTACHMENT_IMAGE)
-        if not message and attachment == ATTACHMENT_NONE:
-            self.log_message.emit("Nội dung bài đăng đang trống.", "error")
+        settings = self._run_settings
+        if settings is None:
+            self.log_message.emit("Chạy quy trình để tạo nội dung trước khi đăng.", "error")
             return
-        if attachment == ATTACHMENT_IMAGE and not self._image_path:
-            self.log_message.emit("Chưa có ảnh để đăng — chạy lại quy trình.", "error")
+        pages = self._run_pages if auto else self.pages_selector.selected_pages()
+        try:
+            validate_destinations(settings, pages)
+            if settings.get("automation_attachment") == ATTACHMENT_NONE and not message:
+                raise ValueError("Nội dung bài đăng đang trống.")
+        except ValueError as exc:
+            self._on_post_error(str(exc))
             return
-        if attachment == ATTACHMENT_VIDEO and not self._video_path:
-            self.log_message.emit("Chưa có video để đăng — chạy lại quy trình.", "error")
-            return
-
-        pages = self.pages_selector.selected_pages()
-        if not pages:
-            self.log_message.emit("Chưa chọn Page nào — vào tab 'Kết nối Facebook' trước.", "error")
-            return
-
+        platforms = selected_platforms(settings)
         scheduled_time = None
         schedule_label = ""
-        if self.schedule_check.isChecked():
+        if "facebook" in platforms and self.schedule_check.isChecked() and not auto:
             dt: datetime = self.schedule_datetime.dateTime().toPython()
-            min_allowed = datetime.now() + timedelta(minutes=10)
-            if dt < min_allowed:
-                self.log_message.emit("Facebook yêu cầu thời gian lên lịch tối thiểu 10 phút sau hiện tại.", "error")
+            if dt < datetime.now() + timedelta(minutes=10):
+                self._on_post_error("Facebook cần lịch đăng ít nhất 10 phút sau hiện tại.")
                 return
             scheduled_time = int(dt.timestamp())
             schedule_label = dt.isoformat(timespec="minutes")
-
-        if not auto and not self.schedule_check.isChecked():
-            page_names = ", ".join(p["name"] for p in pages)
-            confirm = QMessageBox.question(
-                self,
-                "Xác nhận đăng bài",
-                f"Bạn sắp đăng bài NGAY LẬP TỨC lên {len(pages)} Page thật: {page_names}. Tiếp tục?",
-            )
-            if confirm != QMessageBox.StandardButton.Yes:
+        if not auto:
+            names = [PLATFORM_LABELS[key] for key in platforms]
+            if "facebook" in platforms:
+                names.append("Page: " + ", ".join(page["name"] for page in pages))
+            if "tiktok" in platforms:
+                names.append("TikTok: " + settings.get("automation_tiktok_privacy", "SELF_ONLY"))
+            if "youtube" in platforms:
+                names.append("YouTube: " + settings.get("automation_youtube_privacy", "private"))
+            if scheduled_time:
+                names.append("Lịch Facebook: " + schedule_label + "; TikTok/YouTube đăng ngay")
+            if QMessageBox.question(self, "Đăng bài theo cấu hình", "Đăng nội dung lên " + "; ".join(names) + "?") != QMessageBox.StandardButton.Yes:
                 return
-
+        self.run_btn.setEnabled(False)
         self.post_btn.setEnabled(False)
-        self.result_label.setText("")
-        self.post_step.set_status(STATUS_ACTIVE, f"Đang đăng lên {len(pages)} Page...")
-
-        if attachment == ATTACHMENT_IMAGE:
-            post_type = "photo"
-            kwargs = {"image_path": self._image_path, "caption": message, "scheduled_time": scheduled_time}
-        elif attachment == ATTACHMENT_VIDEO:
-            post_type = "video"
-            kwargs = {"video_path": self._video_path, "description": message, "scheduled_time": scheduled_time}
-        else:
-            post_type = "text"
-            kwargs = {"message": message, "link": None, "scheduled_time": scheduled_time}
-
-        self._worker = Worker(post_to_pages, pages=pages, post_type=post_type, **kwargs)
+        self.review_text.setReadOnly(True)
+        self.pages_selector.setEnabled(False)
+        self.schedule_check.setEnabled(False)
+        self.schedule_datetime.setEnabled(False)
+        self.result_label.clear()
+        self.post_step.set_status(STATUS_ACTIVE, "Đang đăng bài theo cấu hình...")
+        self.processing_dialog.start("Đang đăng bài theo cấu hình...")
+        self._worker = Worker(publish_generated, settings=deepcopy(settings), message=message,
+            topic=self._run_topic, pages=deepcopy(pages), image_path=self._image_path,
+            video_path=self._video_path, scheduled_time=scheduled_time,
+            skip_targets=set(self._published_targets))
         self._worker.progress.connect(lambda msg: self.post_step.set_status(STATUS_ACTIVE, msg))
         self._worker.progress.connect(self.processing_dialog.set_status)
-        self._worker.finished.connect(lambda results: self._on_post_done(post_type, message, schedule_label, results))
+        self._worker.finished.connect(lambda results: self._on_post_done(message, schedule_label, results))
         self._worker.error.connect(self._on_post_error)
         self._worker.start()
 
-    def _on_post_done(self, post_type: str, message: str, schedule_label: str, results: list[dict]) -> None:
+    def _unlock_posting(self) -> None:
+        self.run_btn.setEnabled(True)
         self.post_btn.setEnabled(True)
-        attachment_path = str(self._image_path or self._video_path or "")
+        self.review_text.setReadOnly(False)
+        self.pages_selector.setEnabled(True)
+        self.schedule_check.setEnabled(True)
+        self.schedule_datetime.setEnabled(self.schedule_check.isChecked())
 
-        ok_count = sum(1 for r in results if r["ok"])
+    def _on_post_done(self, message: str, schedule_label: str, results: list[dict]) -> None:
+        self._unlock_posting()
         lines = []
-        for r in results:
-            if r["ok"]:
-                lines.append(f"✓ {r['name']}: thành công (id={r['post_id']})")
-                self.log_message.emit(f"Đăng '{r['name']}' thành công (id={r['post_id']}).", "success")
+        for result in results:
+            name = result['name']
+            if result['ok']:
+                self._published_targets.add(result['target'])
+                line = f"✓ {name}: thành công" + (f" (id={result['post_id']})" if result.get('post_id') else "")
+                self.log_message.emit(line, "success")
             else:
-                lines.append(f"✗ {r['name']}: {r['error']}")
-                self.log_message.emit(f"Đăng '{r['name']}' thất bại: {r['error']}", "error")
-            history_store.add_post(
-                post_type,
-                message,
-                attachment_path,
-                schedule_label,
-                r.get("post_id", ""),
-                page_id=r["id"],
-                page_name=r["name"],
-                ok=r["ok"],
-            )
-
-        fail_count = len(results) - ok_count
-        status = STATUS_DONE if fail_count == 0 else STATUS_ERROR
-        summary = f"Hoàn tất: {ok_count} thành công, {fail_count} thất bại."
-        self.post_step.set_status(status, summary)
+                line = f"✗ {name}: {result.get('error', 'Đăng thất bại')}"
+                self.log_message.emit(line, "error")
+            lines.append(line)
+            history_store.add_post(result['post_type'], message, result.get('attachment_path', ''),
+                schedule_label if result['platform'] == 'facebook' else '', result.get('post_id', ''),
+                page_id=result.get('id', ''), page_name=name, ok=result['ok'])
+        failures = sum(not result['ok'] for result in results)
+        if not results:
+            summary = "Các nơi đã đăng thành công được bỏ qua để tránh đăng trùng."
+        else:
+            summary = f"Hoàn tất: {len(results) - failures} thành công, {failures} thất bại."
+        self.post_step.set_status(STATUS_ERROR if failures else STATUS_DONE, summary)
         self.processing_dialog.finish(summary)
-        self.result_label.setText("\n".join(lines))
+        self.result_label.setText("\n".join(lines) or summary)
 
     def _on_post_error(self, message: str) -> None:
-        self.post_btn.setEnabled(True)
+        self._unlock_posting()
         self.post_step.set_status(STATUS_ERROR, f"Lỗi: {message}")
         self.processing_dialog.finish(f"Lỗi đăng bài: {message}")
+        self.result_label.setText(message)
         self.log_message.emit(f"Lỗi đăng bài: {message}", "error")

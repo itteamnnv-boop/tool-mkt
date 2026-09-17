@@ -16,6 +16,7 @@ from app import config
 from app.core.facebook_client import extract_access_token, fetch_pages_with_token
 from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import arrange_cards
+from app.ui.widgets.liquid_glass import GlassCard
 from app.ui.widgets.row_list import RowListWidget
 from app.workers.async_worker import Worker
 
@@ -135,10 +136,10 @@ class FacebookConnectTab(QWidget):
     def _make_page_row(self, page: dict) -> QWidget:
         page_id = page.get("id", "?")
         page_name = page.get("name") or page_id
-        row = QWidget()
+        row = GlassCard()
         row.setObjectName("pageRow")
         h = QHBoxLayout(row)
-        h.setContentsMargins(10, 6, 10, 6)
+        h.setContentsMargins(16, 10, 16, 10)
         label = QLabel(f"<b>{page_name}</b><br><span style='color:#a3b3bf;'>ID: {page_id}</span>")
         label.setWordWrap(True)
         h.addWidget(label, stretch=1)

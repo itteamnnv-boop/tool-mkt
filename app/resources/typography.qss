@@ -1,0 +1,28 @@
+/* Shared type scale for every theme. Sizes are logical pixels (Qt handles DPI). */
+* { font-size: 14px; }
+QLabel { padding: 1px 0; }
+QLabel#pageHeader { font-size: 27px; font-weight: 600; padding: 0; }
+QLabel#pageSubheader { font-size: 13px; padding: 2px 0; }
+QLabel#cardTitle { font-size: 15px; font-weight: 600; padding: 18px 20px 10px 20px; }
+QLabel#sectionTitle, QLabel#timelineTitle { font-size: 15px; font-weight: 600; }
+QLabel#metricTitle, QLabel#metricToday, QLabel#timelineStatus,
+QLabel#mutedHint, QLabel#heroDescription { font-size: 13px; }
+QLabel#metricValue { font-size: 30px; font-weight: 600; }
+QLabel#tokenTotal { font-size: 23px; font-weight: 600; }
+QLabel#heroTitle { font-size: 32px; font-weight: 600; padding: 4px 0; }
+QLabel#heroEyebrow { font-size: 11px; font-weight: 600; padding: 0; }
+QLabel#windowCaption { font-size: 11px; font-weight: 500; padding: 0 6px; }
+QLabel#toolbarDate { font-size: 12px; padding: 0 4px; }
+QPushButton { font-size: 14px; font-weight: 500; }
+QPushButton#primaryButton, QPushButton#linkButton { font-weight: 600; }
+QPushButton#topTab, QLineEdit#toolSearch { font-size: 13px; }
+QPushButton#quickTool { font-size: 13px; padding: 10px 8px; }
+QLineEdit, QComboBox, QDateTimeEdit, QSpinBox, QDoubleSpinBox,
+QDateEdit, QTimeEdit { font-size: 14px; padding: 8px 12px; }
+QLineEdit#toolSearch { padding: 5px 8px; }
+QTextEdit, QPlainTextEdit { font-size: 14px; padding: 12px; }
+QPlainTextEdit#logConsole { font-size: 13px; padding: 14px; }
+QLabel#logHeader { font-size: 12px; font-weight: 600; padding: 12px 14px; }
+QHeaderView::section { font-size: 13px; font-weight: 600; padding: 10px 8px; }
+QCheckBox { font-size: 14px; spacing: 8px; }
+QMenu::item { padding: 8px 14px; }

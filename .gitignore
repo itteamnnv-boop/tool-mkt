@@ -19,3 +19,7 @@ Thumbs.db
 .vscode/
 .idea/
 .bk
+
+# Distribution artifacts
+dist/
+build/

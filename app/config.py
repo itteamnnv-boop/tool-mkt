@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,11 @@ SECRET_KEYS = [
 _LEGACY_FB_TOKEN_KEY = "facebook_page_access_token"
 
 DEFAULT_SETTINGS: dict[str, Any] = {
+    "glass_style": "liquid",
+    "glass_tint": "smoke",
+    "glass_transparency": 100,
+    "glass_outer_transparency": 100,
+    "glass_blur": False,
     "content_provider": "claude",
     "claude_model": "claude-sonnet-5",
     "openai_text_model": "gpt-4o-mini",
@@ -56,13 +62,33 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "automation_hashtags": True,
     "automation_attachment": "image",  # "none" | "image" | "video"
     "automation_auto_post": False,  # when True, skip the manual review/confirm step and post right away
+    "automation_platforms": ["facebook"],
+    "automation_facebook_page_ids": [],
+    "automation_tiktok_privacy": "SELF_ONLY",
+    "automation_tiktok_disable_comment": False,
+    "automation_tiktok_disable_duet": False,
+    "automation_tiktok_disable_stitch": False,
+    "automation_youtube_privacy": "private",
+    "automation_youtube_category": "22",
+    "automation_youtube_title": "",  # empty: use the pipeline topic
+    "automation_youtube_tags": "",
     "mongodb_database": "claude_content_studio",  # only used when the mongodb_uri secret is set
 }
 
 
 def app_data_dir() -> Path:
-    base = os.environ.get("APPDATA") or str(Path.home())
-    d = Path(base) / APP_NAME
+    if sys.platform == "linux":
+        # Keep installations from before XDG support readable without moving their DB.
+        legacy = Path.home() / APP_NAME
+        if (legacy / "config.json").exists() or (legacy / "history.sqlite3").exists():
+            d = legacy
+        else:
+            base = os.environ.get("XDG_DATA_HOME", "")
+            data_home = Path(base) if base and Path(base).is_absolute() else Path.home() / ".local" / "share"
+            d = data_home / APP_NAME
+    else:
+        base = os.environ.get("APPDATA") or str(Path.home())
+        d = Path(base) / APP_NAME
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -108,7 +134,8 @@ def set_secret(name: str, value: str) -> None:
 
 
 def output_dir(subfolder: str) -> Path:
-    d = Path(__file__).resolve().parent.parent / "output" / subfolder
+    root = app_data_dir() if sys.platform == "linux" else Path(__file__).resolve().parent.parent
+    d = root / "output" / subfolder
     d.mkdir(parents=True, exist_ok=True)
     return d
 

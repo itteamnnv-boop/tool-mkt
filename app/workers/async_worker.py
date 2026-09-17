@@ -5,10 +5,13 @@ import inspect
 import traceback
 from typing import Any, Callable
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, QTimer, Signal
 
 
 class Worker(QThread):
+    # Result signals are emitted from run(), before the native thread has stopped.
+    # A callback may replace its owner's Worker reference to start the next step.
+    _active_workers = set()
     finished = Signal(object)
     error = Signal(str)
     progress = Signal(str)
@@ -28,6 +31,23 @@ class Worker(QThread):
             self._kwargs.setdefault("on_progress", lambda msg: self.progress.emit(str(msg)))
         if "on_thumbnail" in params:
             self._kwargs.setdefault("on_thumbnail", lambda url: self.thumbnail.emit(str(url)))
+        self.finished.connect(self._release_when_stopped)
+        self.error.connect(self._release_when_stopped)
+        self.cancelled.connect(self._release_when_stopped)
+
+    def start(self, priority=QThread.Priority.InheritPriority):
+        self._active_workers.add(self)
+        try:
+            super().start(priority)
+        except Exception:
+            self._active_workers.discard(self)
+            raise
+
+    def _release_when_stopped(self):
+        if self.isRunning():
+            QTimer.singleShot(10, self._release_when_stopped)
+        else:
+            self._active_workers.discard(self)
 
     def run(self) -> None:
         try:

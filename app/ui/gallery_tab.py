@@ -1,12 +1,11 @@
 """Tab: Bộ sưu tập — xem, mở lại, tái sử dụng hoặc xoá ảnh/video đã tạo trong lịch sử."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, Signal, QUrl
+from PySide6.QtGui import QPixmap, QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
     QGridLayout,
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from app.storage import history_store
 from app.ui.widgets.page_header import make_page_header
+from app.ui.widgets.liquid_glass import GlassCard
 
 COLUMNS = 4
 CARD_WIDTH = 210
@@ -55,7 +55,7 @@ def _format_created_at(value: Any) -> str:
         return str(value)
 
 
-class _GalleryCard(QWidget):
+class _GalleryCard(GlassCard):
     use_for_post = Signal(Path, str)  # file_path, kind ("image" | "video")
     use_for_video_material = Signal(Path)
     use_for_tiktok = Signal(Path)
@@ -158,7 +158,8 @@ class _GalleryCard(QWidget):
         self.thumb.setText("🎬 Video" if self.kind == "video" else "🖼️ Ảnh (không xem trước được)")
 
     def _on_open(self) -> None:
-        os.startfile(self.file_path)  # noqa: S606 - user-initiated, local file only
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.file_path.resolve()))):
+            self.log_message.emit("Không thể mở file. Hãy kiểm tra ứng dụng xem ảnh/video mặc định.", "error")
 
     def _on_remove_from_history(self) -> None:
         confirm = QMessageBox.question(

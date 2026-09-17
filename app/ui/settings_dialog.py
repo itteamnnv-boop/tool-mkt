@@ -17,6 +17,7 @@ from app.core.heygen_client import HeyGenClient
 from app.core.grok_video_client import GrokVideoClient
 from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import arrange_cards
+from app.ui.widgets.appearance_panel import AppearancePanel
 from app.workers.async_worker import Worker
 
 
@@ -103,7 +104,7 @@ class SettingsTab(QWidget):
         layout.addLayout(mongo_form)
 
         hint = QLabel(
-            "Ghi chú: API key được lưu an toàn trong Windows Credential Manager, không lưu dạng văn bản thuần. "
+            "Ghi chú: API key được lưu an toàn trong kho mật khẩu của hệ điều hành, không lưu dạng văn bản thuần. "
             "Facebook App ID/Secret không bắt buộc — chỉ dùng để tự động đổi User Access Token (dán ở tab "
             "'Kết nối Facebook') sang bản dài hạn. Nếu bỏ trống, kết nối vẫn hoạt động nhưng token chỉ dùng "
             "được trong ~1-2 giờ. TikTok Client Key/Secret lấy từ app bạn tạo tại developers.tiktok.com/apps — "
@@ -134,6 +135,8 @@ class SettingsTab(QWidget):
                 ("Thông tin lưu trữ", [2]),
             ],
         )
+        self.appearance_panel = AppearancePanel()
+        layout.insertWidget(1, self.appearance_panel)
 
     def _with_test_button(self, line_edit: QLineEdit, handler) -> QWidget:
         wrapper = QWidget()

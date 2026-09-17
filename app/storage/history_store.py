@@ -47,6 +47,18 @@ def init_db() -> None:
             sqlite_history_store.init_db()
 
 
+def get_prompt(key: str) -> str | None:
+    """Blocking read: run in a worker and report DB errors to the caller."""
+    return _backend().get_prompt(key)
+
+
+def save_prompt(key: str, text: str) -> None:
+    """Acknowledged write: never report success before the DB has saved the prompt."""
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Prompt không được để trống.")
+    _backend().save_prompt(key, text)
+
+
 def add_content(topic: str, text: str) -> None:
     _fire_and_forget(_backend().add_content, topic, text)
 
