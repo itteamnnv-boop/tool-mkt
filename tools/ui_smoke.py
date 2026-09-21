@@ -83,6 +83,9 @@ def main() -> None:
         stack.enter_context(patch("app.storage.history_store.init_db"))
         stack.enter_context(patch("app.storage.history_store.add_image"))
         stack.enter_context(patch("app.storage.history_store.list_recent", return_value=[]))
+        stack.enter_context(patch("app.storage.history_store.list_contents", return_value=[]))
+        stack.enter_context(patch("app.storage.history_store.list_scheduled_posts", return_value=[]))
+        stack.enter_context(patch("app.storage.history_store.list_successful_posts", return_value=[]))
         stack.enter_context(patch("app.storage.history_store.dashboard_stats", return_value={
             "totals": {"contents": 25, "images": 0, "videos": 4, "posts": 8},
             "today": {"contents": 0, "images": 0, "videos": 0, "posts": 4},
@@ -91,6 +94,20 @@ def main() -> None:
         window = MainWindow()
         window.show()
         app.processEvents()
+
+        # Archived content opens a reusable copy and navigates to each destination.
+        assert window.nav_key_group["archive"] == "creation"
+        window.archive_tab.reuse_requested.emit("content", "Saved topic", "Saved text\n#tag")
+        assert window.stack.currentWidget().widget() is window.content_tab
+        assert window.content_tab.topic_input.text() == "Saved topic"
+        assert window.content_tab.result_text.toPlainText() == "Saved text\n#tag"
+        for destination in ("image", "video"):
+            window.archive_tab.reuse_requested.emit(destination, "Saved topic", "Saved text\n#tag")
+            target = getattr(window, destination + "_tab")
+            assert window.stack.currentWidget().widget() is target
+            assert target._content_context == "Saved text\n#tag"
+        window.archive_tab.reuse_requested.emit("facebook", "Saved topic", "Saved text\n#tag")
+        assert window.stack.currentWidget().widget() is window.facebook_tab
 
         # A user must be able to return to the same tool after visiting settings.
         window.nav_buttons["image"].click()
@@ -103,10 +120,29 @@ def main() -> None:
 
         # Collapsing the group must not remove settings or lose the current page.
         window.group_btn.click()
-        assert not window.nav_group.isVisible()
+        assert window.nav_group.isVisible()
+        assert window.sidebar.width() == 64
+        assert not window.nav_buttons["content"].text()
+        assert settings["sidebar_expanded"] is False
         assert window.settings_btn.isVisible()
         window.group_btn.click()
         assert window.nav_group.isVisible()
+        assert window.sidebar.width() == 224
+        assert window.nav_buttons["content"].text() == window.nav_buttons["content"].toolTip()
+        assert settings["sidebar_expanded"] is True
+
+        # Sections can collapse independently; compact mode keeps all tools reachable.
+        window.nav_group_headers["creation"].click()
+        assert not window.nav_buttons["content"].isVisible()
+        assert settings["sidebar_groups"]["creation"] is False
+        window.group_btn.click()
+        assert window.nav_buttons["content"].isVisible()
+        window.group_btn.click()
+        assert not window.nav_buttons["content"].isVisible()
+        window._show_page("image")
+        assert window.nav_group_headers["creation"].isChecked()
+        assert window.nav_buttons["content"].isVisible()
+        assert settings["sidebar_groups"]["creation"] is True
 
         # Every tool remains reachable from the compact reference-style toolbar.
         for action in window.more_button.menu().actions():
@@ -165,6 +201,21 @@ def main() -> None:
         assert window._appearance["glass_outer_transparency"] == 45
         assert window._appearance["glass_blur"] is True
         assert window.grab().toImage().pixelColor(5, window.height() // 2).alpha() == round(255 * .55)
+        appearance.border_style_combo.setCurrentIndex(appearance.border_style_combo.findData("none"))
+        app.processEvents()
+        assert app.property("border_style") == "none"
+        assert not appearance.border_width_spin.isEnabled()
+        assert not appearance.border_color_btn.isEnabled()
+        appearance.border_style_combo.setCurrentIndex(appearance.border_style_combo.findData("solid"))
+        appearance.border_width_spin.setValue(3.0)
+        appearance.border_opacity_slider.setValue(65)
+        with patch("app.ui.widgets.appearance_panel.QColorDialog.getColor", return_value=QColor("#12abef")):
+            appearance.border_color_btn.click()
+        app.processEvents()
+        assert window._appearance["border_style"] == "solid"
+        assert window._appearance["border_width"] == 3.0
+        assert window._appearance["border_color"] == "#12abef"
+        assert window._appearance["border_opacity"] == 65
         with patch.object(config, "set_secret") as secrets:
             appearance.save_btn.click()
             secrets.assert_not_called()
@@ -173,6 +224,9 @@ def main() -> None:
         assert settings["glass_style"] == "crystal"
         assert settings["glass_outer_transparency"] == 45
         assert settings["glass_blur"] is True
+        assert settings["border_color"] == "#12abef"
+        assert settings["border_width"] == 3.0
+        assert settings["border_opacity"] == 65
         assert settings["facebook_pages"][0]["id"] == "demo-page"
         restored = AppearancePanel()
         assert restored.options() == appearance.options()
@@ -185,6 +239,10 @@ def main() -> None:
         assert appearance_options({"glass_tint": [], "glass_transparency": "invalid"}) == window._appearance
         assert appearance_options({"glass_transparency": 150})["glass_transparency"] == 100
         assert appearance_options({"glass_style": "unknown"})["glass_style"] == "liquid"
+        invalid_border = appearance_options({"border_style": [], "border_width": float("nan"), "border_color": [], "border_opacity": "invalid"})
+        assert invalid_border == DEFAULT_APPEARANCE
+        assert appearance_options({"border_width": 99, "border_opacity": -1})["border_width"] == 4
+        assert appearance_options({"border_opacity": -1})["border_opacity"] == 0
         window._show_page("content")
         app.processEvents()
         rendered = window.grab().toImage()
@@ -223,7 +281,7 @@ def main() -> None:
         # Ubuntu desktop fallback must stay readable, with explicit transparency opt-in.
         with patch.object(QApplication, "platformName", return_value="xcb"):
             with patch.dict(os.environ, {"CLAUDE_STUDIO_TRANSPARENT": "0"}):
-                for style in ("liquid", "crystal"):
+                for style in ("liquid", "crystal", "basic"):
                     window.apply_appearance({**DEFAULT_APPEARANCE, "glass_style": style})
                     app.processEvents()
                     assert app.property("glassLinuxFallback")
@@ -249,14 +307,15 @@ def main() -> None:
         output = ROOT / "output" / "ui-review"
         output.mkdir(parents=True, exist_ok=True)
         issues = []
-        for glass_style in ("liquid", "crystal"):
+        for glass_style in ("liquid", "crystal", "basic"):
             appearance.style_combo.setCurrentIndex(appearance.style_combo.findData(glass_style))
             app.processEvents()
-            style_suffix = "-crystal" if glass_style == "crystal" else ""
+            style_suffix = f"-{glass_style}" if glass_style != "liquid" else ""
             for width, height in [(1240, 840), (980, 680)]:
                 window.resize(width, height)
                 app.processEvents()
                 assert window.width() == width and window.height() == height, window.size()
+                assert window.sidebar.width() == (224 if width >= 1140 else 64)
                 # Exercise visible sidebar controls, including tools previously hidden.
                 for key, button in window.nav_buttons.items():
                     window.nav_scroll.ensureWidgetVisible(button)

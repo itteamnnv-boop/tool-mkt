@@ -27,6 +27,15 @@ class GlassCard(QWidget):
         option = QStyleOption()
         option.initFrom(self)
         self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option, painter, self)
+        app = QApplication.instance()
+        border_style = app.property("border_style") or "glass"
+        opacity = app.property("border_opacity")
+        opacity = 1 if opacity is None else opacity / 100
+        width = app.property("border_width") or 1.5
+        if border_style != "glass" or opacity == 0:
+            painter.end()
+            return
+        painter.setOpacity(opacity)
         bounds = QRectF(self.rect()).adjusted(2, 2, -2, -4)
         radius = min(24, bounds.height() / 2)
         accent = {"contents": "#f1b6ca", "images": "#8be2e0", "videos": "#b6a0f5", "posts": "#9ce2c6"}.get(self.property("metric"))
@@ -48,7 +57,7 @@ class GlassCard(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(34, 37, 48, 45), 2.5))
         painter.drawRoundedRect(bounds.translated(0, 1.5), radius, radius)
-        painter.setPen(QPen(rim, 2.25 if crystal else 1.5))
+        painter.setPen(QPen(rim, width * (1.5 if crystal else 1)))
         painter.drawRoundedRect(bounds, radius, radius)
         inner = bounds.adjusted(2, 2, -2, -2)
         reflection = QLinearGradient(inner.topLeft(), inner.bottomLeft())
@@ -69,15 +78,16 @@ class GlassCard(QWidget):
             glow_color.setAlpha(alpha)
             moving_rim.setColorAt(stop, glow_color)
         # Broad faint strokes provide glow; the narrow stroke keeps the edge crisp.
-        for width, opacity in ((7, 0.10), (4, 0.25), (1.8, 1.0)):
-            painter.setOpacity(opacity)
-            painter.setPen(QPen(moving_rim, width))
+        for stroke_width, stroke_opacity in ((7, 0.10), (4, 0.25), (1.8, 1.0)):
+            painter.setOpacity(opacity * stroke_opacity)
+            painter.setPen(QPen(moving_rim, stroke_width * width / 1.5))
             painter.drawRoundedRect(bounds, radius, radius)
         painter.end()
 
 
 def apply_button_elevation(root):
     crystal = QApplication.instance().property("glassStyle") == "crystal"
+    basic = QApplication.instance().property("buttonStyle") == "basic"
     for button in root.findChildren(QPushButton):
         name = button.objectName()
         # Compact secondary controls often sit in tight form rows that clip a shadow.
@@ -90,4 +100,6 @@ def apply_button_elevation(root):
             shadow.setOffset(0, 3)
             button.setGraphicsEffect(shadow)
         if isinstance(shadow, QGraphicsDropShadowEffect):
-            shadow.setColor(QColor(204, 108, 38, 70) if crystal else QColor(95, 58, 173, 55))
+            shadow.setBlurRadius(8 if basic else 12)
+            shadow.setOffset(0, 2 if basic else 3)
+            shadow.setColor(QColor(0, 90, 200, 45) if basic else (QColor(204, 108, 38, 70) if crystal else QColor(95, 58, 173, 55)))

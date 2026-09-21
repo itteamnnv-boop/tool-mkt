@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+import json
 from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 from app import config
 from app.core import automation_publisher as publisher, social_tokens
+from app.core.facebook_client import FacebookClient
 from app.ui.automation_settings_dialog import AutomationSettingsTab
 from app.ui.automation_tab import AutomationTab
 
@@ -72,9 +74,13 @@ class PublishingChecks(unittest.TestCase):
 
     def test_failure_does_not_block_other_platforms(self):
         self.tiktok.post_video.side_effect = RuntimeError("TikTok rejected")
-        results = self.publish()
+        events = []
+        results = self.publish(on_stage=lambda key, state: events.append((key, state)))
         self.assertEqual([r["ok"] for r in results], [True, False, True])
         self.assertIn("TikTok rejected", results[1]["error"])
+        self.assertEqual(events, [("facebook", "active"), ("facebook", "done"),
+                                  ("tiktok", "active"), ("tiktok", "error"),
+                                  ("youtube", "active"), ("youtube", "done")])
 
     def test_successful_targets_are_not_reposted(self):
         self.assertEqual(self.publish(skip_targets={"facebook:one", "tiktok", "youtube"}), [])
@@ -142,7 +148,7 @@ class PublishingChecks(unittest.TestCase):
              patch("app.ui.automation_tab.HeyGenClient") as heygen, \
              patch("app.ui.automation_tab.history_store.add_content"), \
              patch("app.ui.automation_tab.history_store.add_video"), \
-             patch("app.ui.automation_tab.history_store.add_post") as history, \
+             patch("app.storage.history_store.save_post") as history, \
              patch("app.ui.automation_tab.QMessageBox.question") as confirmation:
             heygen.return_value.generate_and_wait.return_value = self.video
             tab._on_run_pipeline()
@@ -155,8 +161,109 @@ class PublishingChecks(unittest.TestCase):
             confirmation.assert_not_called()
             self.assertTrue(tab.run_btn.isEnabled())
             self.assertFalse(tab.processing_dialog.isVisible())
+            self.assertEqual(tab.processing_dialog.scene.states,
+                             {"content": "done", "asset": "done", "facebook": "done", "tiktok": "done", "youtube": "done"})
             self.assertEqual(self.youtube.upload_video.call_args.kwargs["title"], "Demo idea")
             tab._worker.wait(1000)
+
+    def test_image_count_setting_roundtrip(self):
+        self.settings.update(automation_platforms=["facebook"], automation_attachment="image")
+        panel = AutomationSettingsTab()
+        self.addCleanup(panel.deleteLater)
+        self.assertEqual(panel.image_count_spin.value(), 1)
+        panel.image_count_spin.setValue(3)
+        panel._on_save()
+        restored = AutomationSettingsTab()
+        self.addCleanup(restored.deleteLater)
+        self.assertEqual(restored.image_count_spin.value(), 3)
+        self.assertTrue(restored.image_count_spin.isEnabled())
+        restored.attachment_combo.setCurrentIndex(restored.attachment_combo.findData("video"))
+        self.assertFalse(restored.image_count_spin.isEnabled())
+
+    def test_multiple_images_pipeline_and_partial_failure(self):
+        from PySide6.QtGui import QPixmap, QColor
+        self.settings.update(automation_platforms=["facebook"], automation_attachment="image",
+                             automation_image_count=3, automation_auto_post=True)
+        paths = []
+        for i in range(3):
+            path = self.video.parent / f"image-{i}.png"
+            pixmap = QPixmap(40, 40)
+            pixmap.fill(QColor('blue'))
+            pixmap.save(str(path))
+            paths.append(path)
+        for fail in (False, True):
+            self.facebook.reset_mock()
+            tab = AutomationTab()
+            self.addCleanup(tab.deleteLater)
+            self.addCleanup(tab.processing_dialog.close)
+            tab.idea_input.setPlainText('Three-image post')
+            client = Mock()
+            client.generate_post.return_value = 'Caption'
+            client.suggest_image_prompt.return_value = 'Garden'
+            with patch('app.ui.automation_tab.get_text_client', return_value=client), \
+                 patch('app.ui.automation_tab.ImageClient') as image_client, \
+                 patch('app.ui.automation_tab.history_store.add_content'), \
+                 patch('app.ui.automation_tab.history_store.add_image') as saved, \
+                 patch('app.storage.history_store.save_post'):
+                image_client.return_value.generate_image.side_effect = [paths[0], RuntimeError('Image failed')] if fail else paths
+                tab._on_run_pipeline()
+                for _ in range(150):
+                    QTest.qWait(20)
+                    if tab.run_btn.isEnabled():
+                        break
+                self.assertTrue(tab.run_btn.isEnabled())
+                if fail:
+                    self.facebook.assert_not_called()
+                    self.assertEqual(saved.call_count, 1)
+                    self.assertFalse(tab.post_btn.isEnabled())
+                else:
+                    self.assertEqual(tab._image_paths, paths)
+                    self.assertEqual(tab.image_selector.count(), 3)
+                    self.assertEqual(saved.call_count, 3)
+                    self.assertEqual(self.facebook.call_args.args[1], 'photos')
+                    self.assertEqual(self.facebook.call_args.kwargs['image_paths'], paths)
+                    self.assertEqual(tab._published_targets, {'facebook:one'})
+                tab._worker.wait(1000)
+
+    def test_multi_photo_upload_then_single_feed_and_schedule(self):
+        paths = [self.video, self.video.parent / 'second.png']
+        paths[1].write_bytes(b'image')
+        replies = [Mock(ok=True), Mock(ok=True), Mock(ok=True)]
+        for response, identity in zip(replies, ('photo-1', 'photo-2', 'post-1')):
+            response.json.return_value = {'id': identity}
+        with patch('app.core.facebook_client.requests.post', side_effect=replies) as post:
+            import time
+            scheduled = int(time.time()) + 3600
+            result = FacebookClient('page', 'token').post_photos(paths, 'Caption', scheduled)
+            self.assertEqual(result['id'], 'post-1')
+            self.assertEqual(post.call_count, 3)
+            self.assertEqual(post.call_args_list[0].kwargs['data']['published'], 'false')
+            final = post.call_args.kwargs['data']
+            self.assertEqual(final['scheduled_publish_time'], scheduled)
+            self.assertEqual(final['message'], 'Caption')
+            self.assertEqual(json.loads(final['attached_media']), [{'media_fbid': 'photo-1'}, {'media_fbid': 'photo-2'}])
+        with patch('app.core.facebook_client.requests.post', side_effect=[replies[0], RuntimeError('Upload failed')]) as post:
+            with self.assertRaises(RuntimeError):
+                FacebookClient('page', 'token').post_photos(paths)
+            self.assertTrue(all(call.args[0].endswith('/photos') for call in post.call_args_list))
+
+    def test_generated_images_never_overwrite_each_other(self):
+        from app.core.image_client import ImageClient
+        with patch('app.core.image_client.OpenAI') as api, patch('app.core.image_client.time.time', return_value=12345):
+            api.return_value.images.generate.return_value = Mock(
+                usage=None, data=[Mock(b64_json='aW1hZ2U=', url=None)])
+            client = ImageClient('fake')
+            first = client.generate_image('Prompt', '1024x1024', self.video.parent)
+            second = client.generate_image('Prompt', '1024x1024', self.video.parent)
+            self.assertNotEqual(first, second)
+            self.assertEqual(first.read_bytes(), b'image')
+            self.assertEqual(second.read_bytes(), b'image')
+
+    def test_missing_image_blocks_entire_post(self):
+        settings = {**self.settings, 'automation_platforms': ['facebook'], 'automation_attachment': 'image', 'automation_image_count': 2}
+        with self.assertRaises(ValueError):
+            publisher.publish_generated(settings, 'Caption', 'Topic', self.pages, image_paths=[self.video])
+        self.facebook.assert_not_called()
 
     def test_settings_save_restore_and_validation(self):
         panel = AutomationSettingsTab()
@@ -192,9 +299,9 @@ class PublishingChecks(unittest.TestCase):
             self.assertFalse(tab.run_btn.isEnabled())
             self.assertFalse(tab.post_btn.isEnabled())
             self.assertTrue(tab.review_text.isReadOnly())
-        results = publisher.publish_generated(tab._run_settings, "caption", tab._run_topic,
-                                             tab._run_pages, video_path=self.video)
-        with patch("app.ui.automation_tab.history_store.add_post") as history:
+        with patch("app.storage.history_store.save_post") as history:
+            results = publisher.publish_and_archive(tab._run_settings, "caption", tab._run_topic,
+                                                    tab._run_pages, video_path=self.video)
             tab._on_post_done("caption", "", results)
             self.assertEqual(history.call_count, 3)
         self.assertTrue(tab.run_btn.isEnabled())
@@ -212,6 +319,53 @@ class PublishingChecks(unittest.TestCase):
         self.assertTrue(tab.run_btn.isEnabled())
         self.assertFalse(tab.processing_dialog.isVisible())
         self.assertTrue(tab.result_label.text())
+
+    def test_facebook_preview_follows_edits_selection_and_schedule(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QPixmap
+
+        tab = AutomationTab()
+        preview = tab.facebook_preview
+        tab.review_text.setPlainText("<b>Offer</b>\n#demo")
+        self.assertEqual(preview.content.text(), "<b>Offer</b>\n#demo")
+        self.assertEqual(preview.content.textFormat(), Qt.TextFormat.PlainText)
+        self.assertEqual(preview.page_name.text(), "Demo Page")
+        tab.schedule_check.setChecked(True)
+        self.assertIn(tab.schedule_datetime.dateTime().toString("dd/MM/yyyy HH:mm"), preview.meta.text())
+        tab.pages_selector.set_selected_ids([])
+        self.assertEqual(preview.page_name.text(), "Page Facebook")
+        image = QPixmap(80, 40)
+        image.fill(Qt.GlobalColor.red)
+        preview.set_media(image, "Rendering")
+        preview.finish_video("demo.mp4")
+        self.assertFalse(preview.media._original.isNull())
+        self.assertIn("demo.mp4", preview.video_caption.text())
+        preview.set_media()
+        self.assertTrue(preview.media.isHidden())
+        self.assertTrue(preview.video_caption.isHidden())
+
+    def test_phone_frame_fits_preview_when_resized(self):
+        tab = AutomationTab()
+        for width, height in ((980, 680), (1240, 840), (1600, 1000)):
+            tab.resize(width, height)
+            tab.show()
+            for _ in range(8):
+                self.app.processEvents()
+            view = tab.facebook_preview.phone_view
+            bounds = view.mapFromScene(view.scene().sceneRect()).boundingRect()
+            viewport = view.viewport().rect().adjusted(-1, -1, 1, 1)
+            self.assertTrue(viewport.contains(bounds), (viewport, bounds))
+            self.assertEqual(view.width(), tab.facebook_preview.width())
+            self.assertGreaterEqual(bounds.height(), view.viewport().height() - 6)
+            self.assertGreaterEqual(bounds.width(), view.viewport().width() - 6)
+            self.assertEqual(view.verticalScrollBar().maximum(), 0)
+            self.assertEqual(tab.facebook_preview.screen.width(), 390)
+            self.assertEqual(tab.facebook_preview.screen.height(), 844)
+            self.assertEqual(tab.phone_panel.geometry().right(), tab.width() - 1)
+            self.assertEqual(tab.phone_panel.geometry().bottom(), tab.height() - 1)
+            self.assertEqual(tab.controls_scroll.geometry().bottom(), tab.height() - 1)
+        self.assertGreater(tab.facebook_preview.height(), 540)
+        tab.close()
 
     def test_shared_token_refresh_preserves_accounts(self):
         for platform in ("tiktok", "youtube"):

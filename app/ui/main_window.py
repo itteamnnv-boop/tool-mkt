@@ -25,9 +25,11 @@ from app.storage import history_store
 from app.ui.automation_tab import AutomationTab
 from app.ui.automation_settings_dialog import AutomationSettingsTab
 from app.ui.content_tab import ContentTab
+from app.ui.archive_tab import ArchiveTab
 from app.ui.dashboard_tab import DashboardTab
 from app.ui.facebook_connect_tab import FacebookConnectTab
 from app.ui.facebook_tab import FacebookTab
+from app.ui.facebook_schedule_tab import FacebookScheduleTab
 from app.ui.gallery_tab import GalleryTab
 from app.ui.image_tab import ImageTab
 from app.ui.log_tab import LogTab
@@ -47,10 +49,12 @@ NAV_ENTRIES = [
     ("item", "Dashboard", "dashboard"),
     ("header", "CÔNG CỤ"),
     ("item", "📝  Viết Content", "content"),
+    ("item", "Kho bài viết đã đăng", "archive"),
     ("item", "🖼️  Tạo Ảnh", "image"),
     ("item", "🎬  Tạo Video", "video"),
     ("item", "📚  Bộ sưu tập", "gallery"),
     ("item", "📤  Đăng Facebook", "facebook"),
+    ("item", "Lịch đăng Facebook", "facebook_schedule"),
     ("item", "🔗  Kết nối Facebook", "facebook_connect"),
     ("item", "🎵  Đăng TikTok", "tiktok"),
     ("item", "🔗  Kết nối TikTok", "tiktok_connect"),
@@ -58,6 +62,15 @@ NAV_ENTRIES = [
     ("item", "🔗  Kết nối YouTube", "youtube_connect"),
     ("item", "🚀  Tự động hoá", "automation"),
     ("item", "📋  Nhật ký hoạt động", "logs"),
+]
+
+
+NAV_GROUPS = [
+    ("overview", "Tổng quan", ["dashboard", "gallery"]),
+    ("creation", "Sáng tạo nội dung", ["content", "image", "video", "archive"]),
+    ("social", "Mạng xã hội", ["facebook", "tiktok", "youtube"]),
+    ("connections", "Kết nối", ["facebook_connect", "tiktok_connect", "youtube_connect"]),
+    ("management", "Quản lý", ["facebook_schedule", "automation", "logs"]),
 ]
 
 
@@ -75,10 +88,12 @@ class MainWindow(QMainWindow):
 
         self.dashboard_tab = DashboardTab()
         self.content_tab = ContentTab()
+        self.archive_tab = ArchiveTab()
         self.image_tab = ImageTab()
         self.video_tab = VideoTab()
         self.gallery_tab = GalleryTab()
         self.facebook_tab = FacebookTab()
+        self.facebook_schedule_tab = FacebookScheduleTab()
         self.facebook_connect_tab = FacebookConnectTab()
         self.tiktok_tab = TikTokTab()
         self.tiktok_connect_tab = TikTokConnectTab()
@@ -118,6 +133,7 @@ class MainWindow(QMainWindow):
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(64)
+        self._sidebar_preferred = config.load_settings().get("sidebar_expanded", True) is not False
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(8, 10, 8, 10)
         layout.setSpacing(4)
@@ -131,15 +147,41 @@ class MainWindow(QMainWindow):
         nav_layout.setContentsMargins(0, 0, 0, 0)
         nav_layout.setSpacing(3)
         self.nav_buttons = {}
-        for kind, label, *keys in NAV_ENTRIES:
-            if kind != "item":
-                continue
-            key = keys[0]
-            button = self._icon_button(key, label.split("  ", 1)[-1])
-            button.setCheckable(True)
-            button.clicked.connect(lambda checked=False, k=key: self._show_page(k))
-            self.nav_buttons[key] = button
-            nav_layout.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.nav_group_headers = {}
+        self.nav_group_widgets = {}
+        self.nav_key_group = {}
+        saved_groups = config.load_settings().get("sidebar_groups", {})
+        if not isinstance(saved_groups, dict):
+            saved_groups = {}
+        labels = {entry[2]: entry[1].split("  ", 1)[-1] for entry in NAV_ENTRIES if entry[0] == "item"}
+        for group_key, title, keys in NAV_GROUPS:
+            section = QWidget()
+            section_layout = QVBoxLayout(section)
+            section_layout.setContentsMargins(0, 2, 0, 2)
+            section_layout.setSpacing(3)
+            header = QPushButton()
+            header.setObjectName("navGroupHeader")
+            header.setCheckable(True)
+            header.setChecked(saved_groups.get(group_key, True) is not False)
+            header.setFixedSize(192, 28)
+            header.setAccessibleName(title)
+            self.nav_group_headers[group_key] = header
+            section_layout.addWidget(header, 0, Qt.AlignmentFlag.AlignHCenter)
+            items = QWidget()
+            items_layout = QVBoxLayout(items)
+            items_layout.setContentsMargins(0, 0, 0, 0)
+            items_layout.setSpacing(3)
+            for key in keys:
+                button = self._icon_button(key, labels[key])
+                button.setCheckable(True)
+                button.clicked.connect(lambda checked=False, k=key: self._show_page(k))
+                self.nav_buttons[key] = button
+                self.nav_key_group[key] = group_key
+                items_layout.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
+            self.nav_group_widgets[group_key] = items
+            section_layout.addWidget(items)
+            header.toggled.connect(lambda opened, k=group_key: self._toggle_nav_group(k, opened))
+            nav_layout.addWidget(section)
         nav_layout.addStretch(1)
         self.nav_scroll = QScrollArea()
         self.nav_scroll.setObjectName("navScroll")
@@ -148,13 +190,62 @@ class MainWindow(QMainWindow):
         self.nav_scroll.setMinimumHeight(60)
         self.nav_scroll.setWidget(self.nav_group)
         layout.addWidget(self.nav_scroll, 1)
-        self.group_btn.toggled.connect(self.nav_scroll.setVisible)
+        self.group_btn.toggled.connect(self._toggle_sidebar)
         self.settings_btn = self._icon_button("settings", "Cài đặt")
         self.settings_btn.setCheckable(True)
         self.settings_btn.clicked.connect(lambda: self._show_page("settings"))
         layout.addWidget(self.settings_btn, 0, Qt.AlignmentFlag.AlignHCenter)
         self.nav_buttons["dashboard"].setChecked(True)
+        self.sidebar = sidebar
+        self._sync_sidebar()
         return sidebar
+
+    def _toggle_sidebar(self, expanded: bool) -> None:
+        self._sidebar_preferred = expanded
+        if expanded and self.width() < 1140:
+            self.resize(1140, self.height())
+        settings = config.load_settings()
+        settings["sidebar_expanded"] = expanded
+        config.save_settings(settings)
+        self._sync_sidebar()
+
+    def _sync_sidebar(self) -> None:
+        expanded = self._sidebar_preferred and self.width() >= 1140
+        if getattr(self, "_sidebar_expanded", None) == expanded:
+            return
+        self._sidebar_expanded = expanded
+        self.sidebar.setFixedWidth(224 if expanded else 64)
+        self.group_btn.blockSignals(True)
+        self.group_btn.setChecked(expanded)
+        self.group_btn.blockSignals(False)
+        buttons = [self.group_btn, *self.nav_buttons.values(), self.settings_btn]
+        for button in buttons:
+            button.setProperty("sidebarNav", True)
+            button.setProperty("expanded", expanded)
+            button.setText(("Chức năng" if button is self.group_btn else button.toolTip()) if expanded else "")
+            button.setFixedSize(192 if expanded else 34, 34)
+            button.style().unpolish(button)
+            button.style().polish(button)
+        self.group_btn.setToolTip("Thu gọn sidebar" if expanded else "Mở rộng sidebar")
+        self._sync_nav_groups()
+
+    def _sync_nav_groups(self) -> None:
+        for key, title, _ in NAV_GROUPS:
+            header = self.nav_group_headers[key]
+            opened = header.isChecked()
+            header.setText(("▾ " if opened else "▸ ") + title)
+            header.setToolTip(("Thu gọn " if opened else "Mở nhóm ") + title)
+            header.setVisible(self._sidebar_expanded)
+            self.nav_group_widgets[key].setVisible(not self._sidebar_expanded or opened)
+
+    def _toggle_nav_group(self, key: str, opened: bool) -> None:
+        self._sync_nav_groups()
+        settings = config.load_settings()
+        groups = settings.get("sidebar_groups", {})
+        groups = dict(groups) if isinstance(groups, dict) else {}
+        groups[key] = opened
+        settings["sidebar_groups"] = groups
+        config.save_settings(settings)
 
     def _icon_button(self, key: str, label: str) -> QPushButton:
         button = QPushButton()
@@ -180,10 +271,12 @@ class MainWindow(QMainWindow):
 
         add_page("dashboard", self.dashboard_tab)
         add_page("content", self.content_tab)
+        add_page("archive", self.archive_tab)
         add_page("image", self.image_tab)
         add_page("video", self.video_tab)
         add_page("gallery", self.gallery_tab)
         add_page("facebook", self.facebook_tab)
+        add_page("facebook_schedule", self.facebook_schedule_tab)
         add_page("facebook_connect", self.facebook_connect_tab)
         add_page("tiktok", self.tiktok_tab)
         add_page("tiktok_connect", self.tiktok_connect_tab)
@@ -270,11 +363,18 @@ class MainWindow(QMainWindow):
             self.tool_search.clear()
 
     def _show_page(self, key: str) -> None:
+        group = self.nav_key_group.get(key)
+        if group and self._sidebar_expanded:
+            self.nav_group_headers[group].setChecked(True)
         self.stack.setCurrentIndex(self._page_stack_index[key])
         if key == "dashboard":
             self.dashboard_tab.refresh()
         elif key == "gallery":
             self.gallery_tab.refresh()
+        elif key == "archive":
+            self.archive_tab.refresh()
+        elif key == "facebook_schedule":
+            self.facebook_schedule_tab.refresh()
         for name, button in {**self.nav_buttons, "settings": self.settings_btn}.items():
             active = name == key or (name == "settings" and key == "automation_settings")
             button.setChecked(active)
@@ -285,6 +385,20 @@ class MainWindow(QMainWindow):
         for name, button in self.shortcut_buttons.items():
             button.setChecked(name == key)
 
+    def _reuse_archived_content(self, destination: str, topic: str, text: str) -> None:
+        if destination == "content":
+            if not self.content_tab.load_archived_content(topic, text):
+                return
+        elif destination == "image":
+            self.image_tab.set_context_from_content(text)
+        elif destination == "video":
+            self.video_tab.set_context_from_content(text)
+        elif destination == "facebook":
+            self.facebook_tab.set_message(text)
+        else:
+            return
+        self._show_page(destination)
+
     def _wire_signals(self) -> None:
         self.settings_tab.appearance_panel.appearance_changed.connect(self.apply_appearance)
         self.dashboard_tab.page_requested.connect(self._show_page)
@@ -292,6 +406,8 @@ class MainWindow(QMainWindow):
         self.content_tab.use_for_image.connect(self.image_tab.set_context_from_content)
         self.content_tab.use_for_video.connect(self.video_tab.set_context_from_content)
         self.content_tab.use_for_post.connect(self.facebook_tab.set_message)
+        self.archive_tab.reuse_requested.connect(self._reuse_archived_content)
+        self.facebook_tab.schedules_requested.connect(lambda: self._show_page("facebook_schedule"))
 
         self.image_tab.image_generated.connect(self.facebook_tab.set_image_path)
         self.image_tab.use_for_video.connect(self.video_tab.set_reference_image)
@@ -310,10 +426,12 @@ class MainWindow(QMainWindow):
 
         for tab in (
             self.content_tab,
+            self.archive_tab,
             self.image_tab,
             self.video_tab,
             self.gallery_tab,
             self.facebook_tab,
+            self.facebook_schedule_tab,
             self.facebook_connect_tab,
             self.tiktok_tab,
             self.tiktok_connect_tab,
@@ -380,5 +498,7 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
+        if hasattr(self, "sidebar"):
+            self._sync_sidebar()
         if hasattr(self, "toast") and self.toast.isVisible():
             self.toast.show_message(self.toast.message.text(), self.toast.property("level") or "info")

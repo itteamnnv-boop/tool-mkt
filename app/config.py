@@ -36,6 +36,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "glass_transparency": 100,
     "glass_outer_transparency": 100,
     "glass_blur": False,
+    "border_style": "glass",
+    "border_width": 1.5,
+    "border_color": "#a788f3",
+    "border_opacity": 100,
+    "sidebar_expanded": True,
+    "sidebar_groups": {},
     "content_provider": "claude",
     "claude_model": "claude-sonnet-5",
     "openai_text_model": "gpt-4o-mini",
@@ -61,6 +67,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "automation_tone": "thân thiện, chuyên nghiệp",
     "automation_hashtags": True,
     "automation_attachment": "image",  # "none" | "image" | "video"
+    "automation_image_count": 1,
     "automation_auto_post": False,  # when True, skip the manual review/confirm step and post right away
     "automation_platforms": ["facebook"],
     "automation_facebook_page_ids": [],

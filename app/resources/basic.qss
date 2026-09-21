@@ -1,0 +1,44 @@
+/* Basic buttons: flat fills, blue outlines and restrained rounded corners.
+   Compact navigation controls retain their existing dimensions. */
+QPushButton, QPushButton#quickTool, QPushButton#shortcutCard {
+    background: @SURFACE@; color: @TEXT@;
+    border: 1px solid @BORDER@; border-radius: 8px;
+}
+QPushButton:hover, QPushButton#quickTool:hover, QPushButton#shortcutCard:hover {
+    background: @HOVER@; color: #007bff; border: 1px solid #80b5ff;
+}
+QPushButton:pressed, QPushButton#quickTool:pressed, QPushButton#shortcutCard:pressed {
+    background: @SELECTED@; color: #007bff; border: 1px solid #007bff;
+}
+QPushButton:focus { border: 1px solid #007bff; }
+QPushButton#primaryButton {
+    background: #007bff; color: #ffffff; border: 1px solid #007bff; border-radius: 8px;
+}
+QPushButton#primaryButton:hover { background: #1688ff; color: #ffffff; border: 1px solid #1688ff; }
+QPushButton#primaryButton:pressed { background: #0064d2; color: #ffffff; border: 1px solid #0064d2; }
+QPushButton#primaryButton:focus { border: 1px solid #80b5ff; }
+QPushButton#linkButton {
+    background: @SURFACE@; color: #007bff; border: 1px solid #80b5ff; border-radius: 8px;
+}
+QPushButton#linkButton:hover { background: @HOVER@; color: #007bff; border: 1px solid #007bff; }
+QPushButton#linkButton:pressed { background: @SELECTED@; color: #007bff; border: 1px solid #0064d2; }
+QPushButton#linkButton:focus { border: 1px solid #007bff; }
+QPushButton#topTab, QPushButton#railButton, QPushButton#profileButton,
+QPushButton#windowControl, QPushButton#windowClose {
+    background: transparent; color: @TEXT@; border: 1px solid transparent;
+}
+QPushButton#topTab { border-radius: 8px; }
+QPushButton#topTab:hover, QPushButton#railButton:hover, QPushButton#profileButton:hover,
+QPushButton#windowControl:hover { background: @HOVER@; color: #007bff; border: 1px solid @BORDER@; }
+QPushButton#topTab:checked, QPushButton#railButton:checked, QPushButton#shortcutCard:checked {
+    background: @SELECTED@; color: #007bff; border: 1px solid #80b5ff;
+}
+QPushButton#railButton:focus { border: 1px solid #007bff; }
+QPushButton#windowClose:hover { background: #ff3b3b; color: #ffffff; border: 1px solid #ff3b3b; }
+QPushButton:disabled, QPushButton#primaryButton:disabled, QPushButton#linkButton:disabled,
+QPushButton#quickTool:disabled, QPushButton#shortcutCard:disabled {
+    background: @HOVER@; color: @MUTED@; border: 1px solid @BORDER@;
+}
+QPushButton#toastClose { background: transparent; border: 0; color: @MUTED@; }
+QPushButton#toastClose:hover { background: transparent; color: #007bff; }
+QProgressBar::chunk { background: #007bff; }

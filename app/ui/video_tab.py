@@ -35,6 +35,7 @@ from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import arrange_cards
 from app.ui.widgets.media_preview import MediaPreview
 from app.workers.async_worker import Worker
+from app.ui.widgets.processing_dialog import ProcessingDialog
 
 PROVIDER_HEYGEN = "heygen"
 PROVIDER_GROK = "grok"
@@ -49,12 +50,15 @@ class VideoTab(QWidget):
         self._content_context = ""
         self._current_video_path: Path | None = None
         self._reference_image_path: Path | None = None
+        self._reference_video_path: Path | None = None
+        self._reference_busy = False
         self._material_image_paths: list[Path] = []
         self._avatar_previews: dict[str, str] = {}
         self._worker: Worker | None = None
         self._preview_worker: Worker | None = None
         self._cancel_event: threading.Event | None = None
         self._build_ui()
+        self.processing_dialog = ProcessingDialog(self)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -151,19 +155,29 @@ class VideoTab(QWidget):
         self.script_label = QLabel("Kịch bản (script) để avatar đọc:")
         layout.addWidget(self.script_label)
         self.script_input = QTextEdit()
-        self.script_input.setPlaceholderText("Nhập lời thoại cho video, hoặc dùng nút gợi ý bên dưới.")
+        self.script_input.setPlaceholderText("Nhập lời thoại cho video, hoặc phân tích video mẫu bên dưới.")
         layout.addWidget(self.script_input)
 
-        self.suggest_btn = QPushButton("Gợi ý kịch bản từ content")
-        self.suggest_btn.setObjectName("linkButton")
-        self.suggest_btn.setEnabled(False)
-        self.suggest_btn.clicked.connect(self._on_suggest)
-        layout.addWidget(self.suggest_btn)
-
-        self.reference_video_btn = QPushButton("📎 Đính kèm video mẫu (lấy kịch bản/ý tưởng)")
+        reference_panel = QWidget()
+        reference_layout = QVBoxLayout(reference_panel)
+        reference_layout.setContentsMargins(0, 0, 0, 0)
+        reference_layout.setSpacing(6)
+        reference_actions = QHBoxLayout()
+        self.reference_video_btn = QPushButton("Chọn video mẫu")
         self.reference_video_btn.setObjectName("linkButton")
         self.reference_video_btn.clicked.connect(self._on_attach_reference_video)
-        layout.addWidget(self.reference_video_btn)
+        reference_actions.addWidget(self.reference_video_btn, 1)
+        self.analyze_reference_btn = QPushButton("Phân tích")
+        self.analyze_reference_btn.setObjectName("linkButton")
+        self.analyze_reference_btn.setEnabled(False)
+        self.analyze_reference_btn.clicked.connect(self._on_analyze_reference_video)
+        reference_actions.addWidget(self.analyze_reference_btn)
+        reference_layout.addLayout(reference_actions)
+        self.reference_video_label = QLabel("Chọn video mẫu, rồi bấm Phân tích để đưa ý tưởng từ lời thoại vào prompt.")
+        self.reference_video_label.setObjectName("mutedHint")
+        self.reference_video_label.setWordWrap(True)
+        reference_layout.addWidget(self.reference_video_label)
+        layout.addWidget(reference_panel)
 
         generate_row = QHBoxLayout()
         self.generate_btn = QPushButton("Tạo video với HeyGen")
@@ -196,15 +210,16 @@ class VideoTab(QWidget):
         actions.addWidget(self.open_btn)
         actions.addWidget(self.to_post_btn)
         layout.addLayout(actions)
-        arrange_cards(layout, [("Kịch bản & avatar", list(range(9))), ("Video của bạn", [9, 10, 11])])
+        arrange_cards(layout, [("Kịch bản & avatar", list(range(8))), ("Video của bạn", [8, 9, 10])])
 
         self._load_provider_setting()
         self._on_provider_changed()
 
     def set_context_from_content(self, content_text: str) -> None:
         self._content_context = content_text
-        self.suggest_btn.setEnabled(bool(content_text.strip()))
-        self.log_message.emit("Đã nhận content, có thể bấm 'Gợi ý kịch bản từ content'.", "info")
+        if not self._reference_busy:
+            self.script_input.setPlainText(content_text)
+        self.log_message.emit("Đã nhận content để sử dụng cho video.", "info")
 
     def _make_heygen_client(self) -> HeyGenClient | None:
         try:
@@ -334,14 +349,14 @@ class VideoTab(QWidget):
 
         if is_heygen:
             self.script_label.setText("Kịch bản (script) để avatar đọc:")
-            self.script_input.setPlaceholderText("Nhập lời thoại cho video, hoặc dùng nút gợi ý bên dưới.")
+            self.script_input.setPlaceholderText("Nhập lời thoại cho video, hoặc phân tích video mẫu bên dưới.")
             self.generate_btn.setText("Tạo video với HeyGen")
             if not self._avatar_previews:
                 self.preview.setText("Chưa có video. Chọn Avatar để xem trước.")
         else:
             self.script_label.setText("Mô tả video (prompt) cho Grok:")
             self.script_input.setPlaceholderText(
-                "Mô tả cảnh quay bạn muốn Grok tạo, hoặc dùng nút gợi ý bên dưới."
+                "Mô tả cảnh quay bạn muốn Grok tạo, hoặc phân tích video mẫu bên dưới."
             )
             self.generate_btn.setText("Tạo video với Grok")
             self.preview.setText("Chưa có video. Nhập mô tả và bấm Tạo video.")
@@ -409,28 +424,28 @@ class VideoTab(QWidget):
             self.preview.setPixmap(pixmap)
             self.status_caption.setText(caption)
 
-    def _on_suggest(self) -> None:
-        provider = config.load_settings().get("content_provider", PROVIDER_CLAUDE)
-        try:
-            client = get_text_client(provider)
-        except ValueError as exc:
-            self.log_message.emit(str(exc), "error")
-            return
-        self.suggest_btn.setEnabled(False)
-        self.log_message.emit("Đang nhờ AI gợi ý kịch bản video...", "info")
-        self._worker = Worker(client.suggest_video_script, content_text=self._content_context)
-        self._worker.finished.connect(self._on_suggest_done)
-        self._worker.error.connect(self._on_error)
-        self._worker.start()
-
-    def _on_suggest_done(self, script: str) -> None:
-        self.script_input.setPlainText(script)
-        self.suggest_btn.setEnabled(True)
-        self.log_message.emit("Đã có gợi ý kịch bản.", "success")
-
     def _on_attach_reference_video(self) -> None:
+        if self._reference_busy:
+            return
         path_str, _ = QFileDialog.getOpenFileName(self, "Chọn video/audio mẫu", "", SAMPLE_FILE_FILTER)
         if not path_str:
+            return
+        path = Path(path_str)
+        if not path.is_file():
+            self.log_message.emit("Không tìm thấy tệp mẫu. Hãy chọn lại.", "error")
+            return
+        self._reference_video_path = path
+        self.reference_video_label.setText(f"{path.name} · {path.stat().st_size / (1024 * 1024):.1f} MB · Sẵn sàng phân tích")
+        self.reference_video_label.setToolTip(str(path))
+        self.analyze_reference_btn.setEnabled(True)
+
+    def _on_analyze_reference_video(self) -> None:
+        if self._reference_busy or (self._worker and self._worker.isRunning()):
+            self.log_message.emit("Chờ tác vụ video hiện tại hoàn tất trước khi phân tích mẫu.", "info")
+            return
+        if not self._reference_video_path or not self._reference_video_path.is_file():
+            self.reference_video_label.setText("Hãy chọn video/audio mẫu hợp lệ trước khi phân tích.")
+            self.analyze_reference_btn.setEnabled(False)
             return
         try:
             transcription_client = TranscriptionClient(config.get_secret("openai_api_key"))
@@ -444,20 +459,42 @@ class VideoTab(QWidget):
             self.log_message.emit(str(exc), "error")
             return
 
-        self.reference_video_btn.setEnabled(False)
-        self.suggest_btn.setEnabled(False)
-        self.log_message.emit("Đang trích xuất lời thoại từ video mẫu...", "info")
+        self._set_reference_busy(True)
+        self._on_reference_progress("Đang trích xuất âm thanh và phân tích lời thoại…")
         self._worker = Worker(
             self._build_script_from_reference,
             transcription_client=transcription_client,
             text_client=text_client,
-            file_path=Path(path_str),
+            file_path=self._reference_video_path,
             content_text=self._content_context,
+            target=self._current_provider(),
+            duration=self.duration_spin.value(),
+            aspect_ratio=self.aspect_combo.currentText(),
         )
-        self._worker.progress.connect(lambda msg: self.log_message.emit(msg, "info"))
+        self._worker.progress.connect(self._on_reference_progress)
         self._worker.finished.connect(self._on_reference_script_done)
-        self._worker.error.connect(self._on_error)
+        self._worker.error.connect(self._on_reference_error)
         self._worker.start()
+
+    def _set_reference_busy(self, busy: bool) -> None:
+        self._reference_busy = busy
+        self.reference_video_btn.setEnabled(not busy)
+        self.analyze_reference_btn.setEnabled(not busy and self._reference_video_path is not None)
+        self.analyze_reference_btn.setText("Đang phân tích…" if busy else "Phân tích")
+        self.generate_btn.setEnabled(not busy)
+        self.load_avatars_btn.setEnabled(not busy)
+        self.provider_combo.setEnabled(not busy)
+        self.grok_options.setEnabled(not busy)
+        self.script_input.setReadOnly(busy)
+
+    def _on_reference_progress(self, message: str) -> None:
+        self.reference_video_label.setText(message)
+        self.log_message.emit(message, "info")
+
+    def _on_reference_error(self, message: str) -> None:
+        self._set_reference_busy(False)
+        self.reference_video_label.setText(f"Phân tích chưa thành công: {message}")
+        self.log_message.emit(f"Lỗi phân tích video mẫu: {message}", "error")
 
     @staticmethod
     def _build_script_from_reference(
@@ -465,20 +502,31 @@ class VideoTab(QWidget):
         text_client,
         file_path: Path,
         content_text: str,
+        target: str = PROVIDER_HEYGEN,
+        duration: int = 6,
+        aspect_ratio: str = "16:9",
         on_progress=None,
     ) -> str:
         transcript = transcription_client.transcribe(file_path)
         if on_progress:
-            on_progress("Đã có lời thoại video mẫu, đang viết kịch bản mới lấy cảm hứng...")
-        return text_client.suggest_video_script_from_reference(transcript, content_text)
+            on_progress("Đã có lời thoại, đang chuyển ý tưởng thành prompt…")
+        result = text_client.suggest_video_script_from_reference(
+            transcript, content_text, target=target, duration=duration, aspect_ratio=aspect_ratio
+        )
+        if not result or not result.strip():
+            raise RuntimeError("Chưa nhận được ý tưởng. Hãy bấm Phân tích để thử lại.")
+        return result.strip()
 
     def _on_reference_script_done(self, script: str) -> None:
         self.script_input.setPlainText(script)
-        self.reference_video_btn.setEnabled(True)
-        self.suggest_btn.setEnabled(bool(self._content_context.strip()))
-        self.log_message.emit("Đã tạo kịch bản mới lấy cảm hứng từ video mẫu.", "success")
+        self._set_reference_busy(False)
+        self.script_input.setFocus()
+        self.reference_video_label.setText("Đã đưa ý tưởng vào prompt. Bạn có thể chỉnh sửa trước khi tạo video.")
+        self.log_message.emit("Đã phân tích lời thoại video mẫu và điền ý tưởng vào prompt.", "success")
 
     def _on_generate(self) -> None:
+        if self._reference_busy or (self._worker and self._worker.isRunning()):
+            return
         if self._current_provider() == PROVIDER_HEYGEN:
             self._on_generate_heygen()
         else:
@@ -512,6 +560,7 @@ class VideoTab(QWidget):
         self._worker.finished.connect(lambda path: self._on_done(script, path))
         self._worker.error.connect(self._on_error)
         self._worker.cancelled.connect(self._on_generate_cancelled)
+        self.processing_dialog.track(self._worker, "Đang tạo video với HeyGen...")
         self._worker.start()
 
     def _on_generate_grok(self) -> None:
@@ -554,6 +603,7 @@ class VideoTab(QWidget):
         self._worker.finished.connect(lambda path: self._on_done(prompt, path))
         self._worker.error.connect(self._on_error)
         self._worker.cancelled.connect(self._on_generate_cancelled)
+        self.processing_dialog.track(self._worker, "Đang tạo video với Grok...")
         self._worker.start()
 
     def _start_generation(self, message: str) -> None:
@@ -610,7 +660,6 @@ class VideoTab(QWidget):
         self.stop_btn.setEnabled(False)
         self._cancel_event = None
         self.load_avatars_btn.setEnabled(True)
-        self.suggest_btn.setEnabled(True)
         self.reference_video_btn.setEnabled(True)
         self.status_caption.setText(f"Lỗi: {message}")
         self.log_message.emit(f"Lỗi tạo video: {message}", "error")

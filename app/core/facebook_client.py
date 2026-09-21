@@ -2,12 +2,26 @@
 from __future__ import annotations
 
 import re
+import json
 import urllib.parse
+import time
 from pathlib import Path
 
 import requests
 
-GRAPH_URL = "https://graph.facebook.com/v19.0"
+GRAPH_URL = "https://graph.facebook.com/v26.0"
+
+
+class PublicationUnconfirmed(RuntimeError):
+    """The request may have reached Facebook; do not automatically retry it."""
+
+
+def validate_schedule(scheduled_time):
+    if scheduled_time is not None:
+        if isinstance(scheduled_time, bool) or not isinstance(scheduled_time, int):
+            raise ValueError("Giờ hẹn Facebook không hợp lệ.")
+        if scheduled_time < time.time() + 600:
+            raise ValueError("Giờ hẹn phải còn ít nhất 10 phút tại lúc gửi. Hãy chọn giờ muộn hơn.")
 
 
 class FacebookClient:
@@ -28,6 +42,9 @@ class FacebookClient:
         raise RuntimeError(f"Facebook Graph API lỗi ({resp.status_code}): {detail}")
 
     def post_text(self, message: str, link: str | None = None, scheduled_time: int | None = None) -> dict:
+        validate_schedule(scheduled_time)
+        if not message.strip() and not (link or "").strip():
+            raise ValueError("Bài viết cần nội dung hoặc đường dẫn.")
         params = {"message": message, "access_token": self.token}
         if link:
             params["link"] = link
@@ -38,7 +55,37 @@ class FacebookClient:
         self._raise_for_status(resp)
         return resp.json()
 
+    def update_post(self, post_id: str, message: str, post_type: str) -> dict:
+        if not re.fullmatch(r"[0-9_]+", post_id):
+            raise ValueError("Mã bài Facebook không hợp lệ.")
+        field = "description" if post_type == "video" and "_" not in post_id else "message"
+        resp = requests.post(f"{GRAPH_URL}/{post_id}",
+                             data={"access_token": self.token, field: message}, timeout=60)
+        self._raise_for_status(resp)
+        data = resp.json()
+        if data is False or (isinstance(data, dict) and data.get("success") is False):
+            raise RuntimeError("Facebook chưa xác nhận cập nhật bài viết.")
+        return data
+
+    def get_publication_status(self, post_id: str, post_type: str) -> dict:
+        if not re.fullmatch(r"[0-9_]+", post_id):
+            raise ValueError("Mã bài Facebook không hợp lệ hoặc bị thiếu.")
+        video = post_type == "video" and "_" not in post_id
+        fields = ("id,published,scheduled_publish_time,description,status" if video else
+                  "id,is_published,scheduled_publish_time,message")
+        # Old photo records may contain only a media ID; resolve the Page post.
+        identity = f"{self.page_id}_{post_id}" if post_type == "photo" and "_" not in post_id else post_id
+        response = requests.get(f"{GRAPH_URL}/{identity}",
+                                params={"access_token": self.token, "fields": fields}, timeout=30)
+        self._raise_for_status(response)
+        data = response.json()
+        return {"published": data.get("published" if video else "is_published"),
+                "scheduled_time": data.get("scheduled_publish_time"),
+                "message": data.get("description" if video else "message"),
+                "video_status": data.get("status", {})}
+
     def post_photo(self, image_path: Path, caption: str = "", scheduled_time: int | None = None) -> dict:
+        validate_schedule(scheduled_time)
         params = {"caption": caption, "access_token": self.token}
         if scheduled_time:
             params["published"] = "false"
@@ -49,7 +96,34 @@ class FacebookClient:
         self._raise_for_status(resp)
         return resp.json()
 
+    def post_photos(self, image_paths: list[Path], caption: str = "", scheduled_time: int | None = None) -> dict:
+        validate_schedule(scheduled_time)
+        if not image_paths or any(not Path(path).is_file() for path in image_paths):
+            raise ValueError("Không tìm thấy đầy đủ ảnh để đăng bài.")
+        media = []
+        for path in image_paths:
+            path = Path(path)
+            with path.open("rb") as stream:
+                response = requests.post(
+                    f"{GRAPH_URL}/{self.page_id}/photos",
+                    data={"access_token": self.token, "published": "false", "temporary": "true"},
+                    files={"source": (path.name, stream, "application/octet-stream")}, timeout=180,
+                )
+            self._raise_for_status(response)
+            photo_id = response.json().get("id")
+            if not photo_id:
+                raise RuntimeError("Facebook không trả về ID ảnh. Chưa đăng bài.")
+            media.append({"media_fbid": photo_id})
+        params = {"message": caption, "access_token": self.token, "attached_media": json.dumps(media)}
+        validate_schedule(scheduled_time)  # Uploading the album may have consumed the scheduling window.
+        if scheduled_time:
+            params.update(published="false", scheduled_publish_time=scheduled_time)
+        response = requests.post(f"{GRAPH_URL}/{self.page_id}/feed", data=params, timeout=60)
+        self._raise_for_status(response)
+        return response.json()
+
     def post_video(self, video_path: Path, description: str = "", scheduled_time: int | None = None) -> dict:
+        validate_schedule(scheduled_time)
         params = {"description": description, "access_token": self.token}
         if scheduled_time:
             params["published"] = "false"
@@ -117,6 +191,8 @@ def post_to_pages(pages: list[dict], post_type: str, on_progress=None, **kwargs)
     kwargs are forwarded to the matching FacebookClient.post_* method.
     Returns one result dict per page so a failure on one page never blocks the others.
     """
+    if post_type not in {"text", "photo", "photos", "video"}:
+        raise ValueError("Loại bài Facebook không được hỗ trợ.")
     results = []
     total = len(pages)
     for idx, page in enumerate(pages, start=1):
@@ -124,17 +200,25 @@ def post_to_pages(pages: list[dict], post_type: str, on_progress=None, **kwargs)
             on_progress(f"Đang đăng lên '{page['name']}' ({idx}/{total})...")
         try:
             client = FacebookClient(page["id"], page["token"])
-            if post_type == "photo":
+            if post_type == "photos":
+                data = client.post_photos(**kwargs)
+            elif post_type == "photo":
                 data = client.post_photo(**kwargs)
             elif post_type == "video":
                 data = client.post_video(**kwargs)
             else:
                 data = client.post_text(**kwargs)
-            results.append(
-                {"id": page["id"], "name": page["name"], "ok": True, "post_id": data.get("id") or data.get("post_id", "")}
-            )
+            identity = (data.get("post_id") or data.get("id")) if isinstance(data, dict) else None
+            if not identity:
+                raise PublicationUnconfirmed("Facebook chưa trả về mã bài. Kiểm tra Page trước khi đăng lại để tránh trùng bài.")
+            results.append({"id": page["id"], "name": page["name"], "ok": True, "post_id": str(identity)})
         except Exception as exc:  # noqa: BLE001 - one page's failure must not abort the rest
-            results.append({"id": page["id"], "name": page["name"], "ok": False, "error": str(exc)})
+            uncertain = isinstance(exc, (PublicationUnconfirmed, requests.Timeout, requests.ConnectionError))
+            error = str(exc).replace(page["token"], "[token]") if page.get("token") else str(exc)
+            if uncertain and not isinstance(exc, PublicationUnconfirmed):
+                error = "Mất kết nối, chưa xác nhận kết quả. Kiểm tra Page trước khi đăng lại. " + error
+            results.append({"id": page["id"], "name": page["name"], "ok": False,
+                            "uncertain": uncertain, "error": error})
     return results
 
 

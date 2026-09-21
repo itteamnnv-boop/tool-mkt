@@ -23,6 +23,7 @@ from app.storage import history_store
 from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import arrange_cards
 from app.workers.async_worker import Worker
+from app.ui.widgets.processing_dialog import ProcessingDialog
 
 
 from app.core.social_tokens import ensure_tiktok_token as _ensure_valid_token
@@ -36,6 +37,7 @@ class TikTokTab(QWidget):
         self._video_path: Path | None = None
         self._worker: Worker | None = None
         self._build_ui()
+        self.processing_dialog = ProcessingDialog(self)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -143,6 +145,7 @@ class TikTokTab(QWidget):
         self._worker.progress.connect(lambda msg: self.status_label.setText(msg))
         self._worker.finished.connect(self._on_done)
         self._worker.error.connect(self._on_error)
+        self.processing_dialog.track(self._worker, "Đang đăng video lên TikTok...")
         self._worker.start()
 
     @staticmethod
@@ -171,7 +174,9 @@ class TikTokTab(QWidget):
         self.post_btn.setEnabled(True)
         self.status_label.setText("Đã đăng lên TikTok thành công.")
         history_store.add_post(
-            "tiktok_video", self.caption_input.toPlainText().strip(), str(self._video_path or ""), ok=True
+            "tiktok_video", self.caption_input.toPlainText().strip(), str(self._video_path or ""),
+            facebook_post_id=str((_result.get("publicaly_available_post_id") or [_result.get("publish_id", "")])[0]),
+            ok=True
         )
         self.log_message.emit("Đăng TikTok thành công.", "success")
 

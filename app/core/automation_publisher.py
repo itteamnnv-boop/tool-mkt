@@ -1,5 +1,6 @@
 """Publish one generated asset to configured destinations, isolating each failure."""
 from pathlib import Path
+import json
 
 from app import config
 from app.core.facebook_client import post_to_pages
@@ -8,6 +9,28 @@ from app.core.tiktok_client import TikTokClient
 from app.core.youtube_client import YouTubeClient
 
 PLATFORM_LABELS = {"facebook": "Facebook", "tiktok": "TikTok", "youtube": "YouTube"}
+
+
+def publish_and_archive(settings, message, topic, pages, image_path=None, video_path=None,
+                        scheduled_time=None, skip_targets=None, on_progress=None, on_stage=None,
+                        image_paths=None):
+    from datetime import datetime
+    from app.storage import history_store
+    results = publish_generated(settings, message, topic, pages, image_path, video_path,
+                                scheduled_time, skip_targets, on_progress, on_stage, image_paths)
+    for result in results:
+        try:
+            schedule = (datetime.fromtimestamp(scheduled_time).astimezone().isoformat(timespec="minutes")
+                        if scheduled_time and result["platform"] == "facebook" else "")
+            history_store.save_post(result["post_type"], message, result.get("attachment_path", ""),
+                                    schedule, result.get("post_id", ""), result.get("id", ""),
+                                    result["name"], result["ok"], error=result.get("error", ""),
+                                    uncertain=result.get("uncertain", False),
+                                    link_url=settings.get("automation_facebook_link", "") if result["post_type"] == "text" else "")
+        except Exception as exc:
+            # A published post stays successful so Retry never publishes it twice.
+            result["archive_error"] = str(exc)
+    return results
 
 
 def selected_platforms(settings):
@@ -40,10 +63,16 @@ def validate_destinations(settings, pages):
 
 
 def publish_generated(settings, message, topic, pages, image_path=None, video_path=None,
-                      scheduled_time=None, skip_targets=None, on_progress=None):
+                      scheduled_time=None, skip_targets=None, on_progress=None, on_stage=None, image_paths=None):
     results = []
     skipped = set(skip_targets or ())
     attachment = settings.get("automation_attachment", "image")
+    photos = [Path(p) for p in image_paths] if image_paths is not None else ([Path(image_path)] if image_path else [])
+    if attachment == "image":
+        expected = int(settings.get("automation_image_count", 1))
+        if len(photos) != expected or any(not p.is_file() for p in photos):
+            raise ValueError(f"Cần đủ {expected} ảnh cho bài viết. Chạy lại bước tạo ảnh trước khi đăng.")
+        image_path = photos[0]
     path = image_path if attachment == "image" else video_path if attachment == "video" else None
     if attachment != "none" and (not path or not Path(path).is_file()):
         raise ValueError("Không tìm thấy ảnh/video đã tạo. Chạy lại quy trình.")
@@ -52,24 +81,40 @@ def publish_generated(settings, message, topic, pages, image_path=None, video_pa
         if platform == "facebook":
             pending = [page for page in pages if f"facebook:{page['id']}" not in skipped]
             if not pending:
+                if on_stage:
+                    on_stage(platform, "skipped")
                 continue
             post_type = {"none": "text", "image": "photo", "video": "video"}[attachment]
+            if attachment == "image" and len(photos) > 1:
+                post_type = "photos"
             kwargs = {"scheduled_time": scheduled_time}
-            if post_type == "photo":
+            if post_type == "photos":
+                kwargs.update(image_paths=photos, caption=message)
+            elif post_type == "photo":
                 kwargs.update(image_path=image_path, caption=message)
             elif post_type == "video":
                 kwargs.update(video_path=video_path, description=message)
             else:
-                kwargs.update(message=message, link=None)
-            for result in post_to_pages(pending, post_type, on_progress=on_progress, **kwargs):
+                kwargs.update(message=message, link=settings.get("automation_facebook_link") or None)
+            if on_stage:
+                on_stage(platform, "active")
+            platform_results = post_to_pages(pending, post_type, on_progress=on_progress, **kwargs)
+            for result in platform_results:
                 results.append({**result, "platform": platform, "target": f"facebook:{result['id']}",
-                                "post_type": post_type, "attachment_path": str(path or "")})
+                                "post_type": post_type, "attachment_path":
+                                json.dumps([str(p) for p in photos], ensure_ascii=False) if post_type == "photos" else str(path or "")})
+            if on_stage:
+                on_stage(platform, "done" if all(result["ok"] for result in platform_results) else "error")
             continue
         if platform in skipped:
+            if on_stage:
+                on_stage(platform, "skipped")
             continue
         result = {"platform": platform, "target": platform, "name": PLATFORM_LABELS[platform],
                   "id": "", "post_type": f"{platform}_video", "attachment_path": str(video_path or "")}
         try:
+            if on_stage:
+                on_stage(platform, "active")
             if not video_path or not Path(video_path).is_file():
                 raise ValueError(f"{result['name']} cần video đã tạo.")
             if on_progress:
@@ -100,4 +145,6 @@ def publish_generated(settings, message, topic, pages, image_path=None, video_pa
         except Exception as exc:
             result.update(ok=False, error=str(exc))
         results.append(result)
+        if on_stage:
+            on_stage(platform, "done" if result["ok"] else "error")
     return results

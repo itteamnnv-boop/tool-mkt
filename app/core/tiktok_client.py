@@ -72,7 +72,7 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
             params = urllib.parse.parse_qs(parsed.query)
             _CallbackHandler.result = {k: v[0] for k, v in params.items()}
             self.wfile.write(
-                "<html><body style='font-family:sans-serif;padding:40px;text-align:center;'>"
+                "<html><body style='font-family:Arial,sans-serif;padding:40px;text-align:center;'>"
                 "<h2>Đã đăng nhập TikTok — đóng tab này và quay lại ứng dụng.</h2>"
                 "</body></html>".encode("utf-8")
             )

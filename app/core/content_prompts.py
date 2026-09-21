@@ -66,18 +66,31 @@ def build_video_script_user_prompt(content_text: str) -> str:
     )
 
 
-def build_video_script_from_reference_user_prompt(transcript: str, content_text: str) -> str:
+def build_video_script_from_reference_user_prompt(
+    transcript: str, content_text: str, target: str = "heygen", duration: int = 6, aspect_ratio: str = "16:9"
+) -> str:
     context_block = (
         f"\nNội dung bài đăng Facebook liên quan (ngữ cảnh sản phẩm/thương hiệu, nếu có):\n{content_text}\n"
         if content_text.strip()
         else ""
+    )
+    output_instruction = (
+        f"Hãy viết MỘT prompt tiếng Việt để tạo video bằng Grok, thời lượng {duration} giây, "
+        f"tỉ lệ {aspect_ratio}. Lấy ý tưởng và thông điệp chính từ lời thoại mẫu, "
+        "chuyển thành mô tả chủ thể, bối cảnh, hành động, bố cục, ánh sáng, chuyển động máy quay "
+        "và nhịp cảnh phù hợp với thời lượng. Ưu tiên ngữ cảnh sản phẩm/thương hiệu nếu có. "
+        "Đây là cảnh quay mới do bạn đề xuất từ lời thoại, không được khẳng định đã quan sát "
+        "hình ảnh trong video gốc. Chỉ trả về prompt sẵn sàng dùng, không thêm giải thích, "
+        "không chỉ viết lời thoại và không thêm lời chào."
+        if target == "grok" else
+        "Hãy viết MỘT kịch bản lời thoại mới (tiếng Việt, giọng nói tự nhiên, 20-40 giây khi đọc), "
+        "lấy cảm hứng từ video mẫu trên nhưng nội dung hoàn toàn mới và phù hợp với ngữ cảnh sản phẩm/"
+        "thương hiệu ở trên (nếu có). Chỉ trả về lời thoại, không thêm chú thích cảnh quay hay giải thích."
     )
     return (
         "Dưới đây là lời thoại trích xuất (transcript) từ một video mẫu — chỉ dùng để THAM KHẢO "
         "ý tưởng, cấu trúc, nhịp điệu, KHÔNG được sao chép nguyên văn:\n"
         f"---\n{transcript}\n---\n"
         f"{context_block}\n"
-        "Hãy viết MỘT kịch bản lời thoại mới (tiếng Việt, giọng nói tự nhiên, 20-40 giây khi đọc), "
-        "lấy cảm hứng từ video mẫu trên nhưng nội dung hoàn toàn mới và phù hợp với ngữ cảnh sản phẩm/"
-        "thương hiệu ở trên (nếu có). Chỉ trả về lời thoại, không thêm chú thích cảnh quay hay giải thích."
+        f"{output_instruction}"
     )

@@ -23,6 +23,7 @@ from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import arrange_cards
 from app.ui.widgets.media_preview import MediaPreview
 from app.workers.async_worker import Worker
+from app.ui.widgets.processing_dialog import ProcessingDialog
 
 
 class ImageTab(QWidget):
@@ -36,6 +37,7 @@ class ImageTab(QWidget):
         self._current_image_path: Path | None = None
         self._worker: Worker | None = None
         self._build_ui()
+        self.processing_dialog = ProcessingDialog(self)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -135,6 +137,7 @@ class ImageTab(QWidget):
         )
         self._worker.finished.connect(lambda path: self._on_done(prompt, path))
         self._worker.error.connect(self._on_error)
+        self.processing_dialog.track(self._worker, "Đang tạo ảnh với OpenAI...")
         self._worker.start()
 
     def _on_done(self, prompt: str, path: Path) -> None:

@@ -87,7 +87,7 @@ def main() -> int:
     app.setWindowIcon(QIcon(str(Path(__file__).resolve().parent / "app" / "resources" / "studio.svg")))
     apply_theme(app)
     window = MainWindow()
-    window.show()
+    window.showMaximized()
     if os.environ.get("CLAUDE_STUDIO_NO_RELOAD") != "1" and not getattr(sys, "frozen", False):
         CodeReloader(app, window)
     return app.exec()

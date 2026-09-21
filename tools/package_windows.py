@@ -41,6 +41,8 @@ def build_pyinstaller_bundle(root: Path = ROOT) -> Path:
             "PyInstaller",
             "--noconfirm",
             "--windowed",
+            "--collect-all",
+            "imageio_ffmpeg",
             "--name",
             APP_NAME,
             "--add-data",

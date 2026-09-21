@@ -6,6 +6,7 @@ row_list.py for why that avoids clipped text and stray empty space.
 """
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app import config
@@ -13,6 +14,8 @@ from app.ui.widgets.row_list import RowListWidget
 
 
 class PagesSelectorWidget(QWidget):
+    selection_changed = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._checkboxes: dict[str, QCheckBox] = {}
@@ -64,8 +67,13 @@ class PagesSelectorWidget(QWidget):
             checkbox.setToolTip(f"{page_name}\nID: {page_id}")
             checkbox.setObjectName("pageCheckRow")
             checkbox.setChecked(page_id in checked_ids if checked_ids else True)
+            checkbox.toggled.connect(lambda _checked: self.selection_changed.emit())
             self._checkboxes[page_id] = checkbox
             self.row_list.add_row(checkbox)
+        self.selection_changed.emit()
+
+    def selected_names(self) -> list[str]:
+        return [checkbox.text() for checkbox in self._checkboxes.values() if checkbox.isChecked()]
 
     def set_selected_ids(self, ids) -> None:
         for page_id, checkbox in self._checkboxes.items():

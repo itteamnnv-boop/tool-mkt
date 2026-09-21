@@ -23,6 +23,7 @@ from app.storage import history_store
 from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import arrange_cards
 from app.workers.async_worker import Worker
+from app.ui.widgets.processing_dialog import ProcessingDialog
 
 
 from app.core.social_tokens import ensure_youtube_token as _ensure_valid_token
@@ -36,6 +37,7 @@ class YouTubeTab(QWidget):
         self._video_path: Path | None = None
         self._worker: Worker | None = None
         self._build_ui()
+        self.processing_dialog = ProcessingDialog(self)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -144,6 +146,7 @@ class YouTubeTab(QWidget):
         self._worker.progress.connect(lambda msg: self.status_label.setText(msg))
         self._worker.finished.connect(self._on_done)
         self._worker.error.connect(self._on_error)
+        self.processing_dialog.track(self._worker, "Đang tải video lên YouTube...")
         self._worker.start()
 
     @staticmethod
@@ -176,7 +179,7 @@ class YouTubeTab(QWidget):
         )
         history_store.add_post(
             "youtube_video",
-            self.title_input.text().strip() or self.description_input.toPlainText().strip(),
+            "\n\n".join(part for part in (self.title_input.text().strip(), self.description_input.toPlainText().strip()) if part),
             str(self._video_path or ""),
             facebook_post_id=video_id,
             ok=True,

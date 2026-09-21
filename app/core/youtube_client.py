@@ -31,7 +31,7 @@ AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
-SCOPE = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
+SCOPE = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl"
 VIDEO_FILE_FILTER = "Video (*.mp4 *.mov *.webm *.avi *.mkv)"
 
 # 8MB per PUT chunk — keeps memory use low regardless of video size, well within Google's
@@ -77,7 +77,7 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
         self.wfile.write(
-            "<html><body style='font-family:sans-serif;padding:40px;text-align:center;'>"
+            "<html><body style='font-family:Arial,sans-serif;padding:40px;text-align:center;'>"
             "<h2>Đã đăng nhập Google/YouTube — đóng tab này và quay lại ứng dụng.</h2>"
             "</body></html>".encode("utf-8")
         )
@@ -223,6 +223,27 @@ class YouTubeClient:
 
     def _headers(self, **extra: str) -> dict:
         return {"Authorization": f"Bearer {self.access_token}", **extra}
+
+    def update_description(self, video_id: str, description: str) -> dict:
+        if len(description) > 5000 or "<" in description or ">" in description:
+            raise ValueError("Mô tả YouTube tối đa 5000 ký tự và không chứa < hoặc >.")
+        url = "https://www.googleapis.com/youtube/v3/videos"
+        response = requests.get(url, headers=self._headers(),
+                                params={"part": "snippet", "id": video_id}, timeout=30)
+        _raise_for_status(response)
+        items = response.json().get("items", [])
+        if not items:
+            raise ValueError("Không tìm thấy video YouTube.")
+        source = items[0]["snippet"]
+        snippet = {key: source[key] for key in
+                   ("title", "categoryId", "tags", "defaultLanguage", "defaultAudioLanguage") if key in source}
+        snippet["description"] = description
+        response = requests.put(url, headers=self._headers(), params={"part": "snippet"},
+                                json={"id": video_id, "snippet": snippet}, timeout=60)
+        if response.status_code == 403:
+            raise RuntimeError("YouTube từ chối cập nhật. Kết nối lại YouTube để cấp quyền sửa video và kiểm tra quyền sở hữu.")
+        _raise_for_status(response)
+        return response.json()
 
     def get_own_channel(self) -> dict:
         resp = requests.get(

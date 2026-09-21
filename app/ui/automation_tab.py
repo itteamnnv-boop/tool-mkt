@@ -13,19 +13,21 @@ from PySide6.QtCore import QDateTime, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDateTimeEdit,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from app import config
-from app.core.automation_publisher import configured_pages, publish_generated, selected_platforms, validate_destinations, PLATFORM_LABELS
+from app.core.automation_publisher import configured_pages, selected_platforms, validate_destinations, PLATFORM_LABELS
 from app.core.heygen_client import HeyGenClient
 from app.core.image_client import ImageClient
 from app.core.text_provider import PROVIDER_LABELS, get_text_client
@@ -38,6 +40,7 @@ from app.ui.automation_settings_dialog import (
 from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import card
 from app.ui.widgets.media_preview import MediaPreview
+from app.ui.widgets.facebook_post_preview import FacebookPostPreview
 from app.ui.widgets.pages_selector import PagesSelectorWidget
 from app.ui.widgets.processing_dialog import ProcessingDialog
 from app.ui.widgets.timeline import STATUS_ACTIVE, STATUS_DONE, STATUS_ERROR, STATUS_SKIPPED, TimelineWidget
@@ -54,6 +57,8 @@ class AutomationTab(QWidget):
         self._thumbnail_worker: Worker | None = None
         self._content_text = ""
         self._image_path: Path | None = None
+        self._image_paths: list[Path] = []
+        self._image_prompt = ""
         self._video_path: Path | None = None
         self._active_step = None
         self._run_settings = None
@@ -66,9 +71,24 @@ class AutomationTab(QWidget):
     # ---------- UI ----------
 
     def _build_ui(self) -> None:
+        self.setObjectName("automationWorkspace")
+        self.setStyleSheet("""
+            QWidget#automationWorkspace QLabel, QWidget#automationWorkspace QCheckBox,
+            QWidget#automationWorkspace QTextEdit, QWidget#automationWorkspace QDateTimeEdit { font-size: 12px; }
+            QWidget#automationWorkspace QLabel#pageHeader { font-size: 23px; }
+            QWidget#automationWorkspace QLabel#pageSubheader { font-size: 12px; }
+            QWidget#automationWorkspace QLabel#cardTitle { font-size: 13px; padding: 10px 12px 4px 12px; }
+            QWidget#automationWorkspace QLabel#timelineTitle { font-size: 12px; }
+            QWidget#automationWorkspace QLabel#timelineStatus { font-size: 11px; }
+            QWidget#automationWorkspace QPushButton { font-size: 12px; min-height: 0px; padding: 4px 10px; border-radius: 9px; }
+            QWidget#automationWorkspace QTextEdit { padding: 7px; }
+            QWidget#automationWorkspace QDateTimeEdit { padding: 4px 6px; }
+            QWidget#automationWorkspace QTabBar::tab { font-size: 12px; padding: 5px 9px; min-height: 0px; }
+            QScrollArea#automationControls { background: transparent; border: none; }
+        """)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(18)
+        layout.setSpacing(10)
 
         header_row = QHBoxLayout()
         header_row.addWidget(
@@ -85,71 +105,139 @@ class AutomationTab(QWidget):
         layout.addLayout(header_row)
 
         columns = QHBoxLayout()
-        columns.setSpacing(20)
+        columns.setSpacing(12)
         layout.addLayout(columns, 1)
-        idea_card, idea_layout = card("Ý tưởng khởi đầu")
-        columns.addWidget(idea_card, 1)
+        self.controls_scroll = QScrollArea()
+        self.controls_scroll.setObjectName("automationControls")
+        self.controls_scroll.setWidgetResizable(True)
+        self.controls_scroll.setMinimumWidth(320)
+        self.controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        controls = QWidget()
+        setup = QVBoxLayout(controls)
+        setup.setContentsMargins(0, 0, 4, 0)
+        setup.setSpacing(10)
+        self.controls_scroll.setWidget(controls)
+        columns.addWidget(self.controls_scroll, 2)
+        workspace = QVBoxLayout()
+        workspace.setSpacing(10)
+        columns.addLayout(workspace, 3)
 
+        idea_card, idea_layout = card("1. Ý tưởng & cấu hình")
+        idea_layout.setContentsMargins(12, 6, 12, 12)
+        idea_layout.setSpacing(7)
+        setup.addWidget(idea_card)
         idea_layout.addWidget(QLabel("Ý tưởng / chủ đề:"))
         self.idea_input = QTextEdit()
         self.idea_input.setPlaceholderText(
             "VD: Ưu đãi phân bón hữu cơ mùa vụ mới cho bà con miền Tây, nhấn mạnh tăng năng suất và tiết kiệm chi phí"
         )
-        self.idea_input.setFixedHeight(160)
+        self.idea_input.setFixedHeight(88)
         idea_layout.addWidget(self.idea_input)
-
-        self.run_btn = QPushButton("Chạy quy trình tự động")
+        self.config_summary = QLabel()
+        self.config_summary.setWordWrap(True)
+        self.config_summary.setObjectName("mutedHint")
+        idea_layout.addWidget(self.config_summary)
+        self.run_btn = QPushButton("Chạy quy trình")
         self.run_btn.setObjectName("primaryButton")
         self.run_btn.clicked.connect(self._on_run_pipeline)
         idea_layout.addWidget(self.run_btn)
-        idea_layout.addStretch(1)
 
-        progress_card, progress_layout = card("Tiến trình & duyệt bài")
-        columns.addWidget(progress_card, 1)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        progress_layout.addWidget(scroll, 1)
-        self.timeline = TimelineWidget(["Viết Content", "Tạo Ảnh / Video", "Đăng bài"])
-        scroll.setWidget(self.timeline)
+        self.timeline = TimelineWidget(["Viết nội dung", "Tạo ảnh / video", "Xuất bản"])
+        self.timeline.layout().setSpacing(4)
+        idea_layout.addWidget(self.timeline)
         self.content_step, self.asset_step, self.post_step = self.timeline.steps
+        for step in self.timeline.steps:
+            step.layout().setContentsMargins(8, 5, 8, 5)
+            step.layout().setSpacing(8)
+            step.content_layout.setSpacing(0)
+            step.line.hide()
+            step.line.setMinimumHeight(0)
 
+        review_card, review_layout = card("2. Chỉnh sửa & media")
+        review_layout.setContentsMargins(12, 6, 12, 12)
+        review_layout.setSpacing(6)
+        workspace.addWidget(review_card, 1)
+        self.review_tabs = QTabWidget()
+        review_layout.addWidget(self.review_tabs, 1)
+        self.phone_panel, phone_layout = card("iPhone 12 · Facebook")
+        phone_layout.setContentsMargins(8, 6, 8, 12)
+        columns.addWidget(self.phone_panel, 0, Qt.AlignmentFlag.AlignRight)
+        self.facebook_preview = FacebookPostPreview()
+        def fit_preview_column(height):
+            self.phone_panel.setFixedWidth(self.facebook_preview.width() + 16)
+
+        self.facebook_preview.height_changed.connect(fit_preview_column)
+        phone_layout.addWidget(self.facebook_preview, 1)
+        self.facebook_preview.setToolTip("iPhone 12 · 390 × 844 · Tự co theo cửa sổ")
         self._build_content_step_extra()
         self._build_asset_step_extra()
-        self._build_post_step_extra()
+
+        post_card, post_layout = card("3. Nơi đăng & xuất bản")
+        post_layout.setContentsMargins(12, 6, 12, 12)
+        post_layout.setSpacing(7)
+        setup.addWidget(post_card)
+        setup.addStretch(1)
+        self._build_post_step_extra(post_layout)
+        for button in self.findChildren(QPushButton):
+            button.setFixedHeight(28)
+        self._refresh_config_summary()
 
     def _build_content_step_extra(self) -> None:
         self.review_text = QTextEdit()
         self.review_text.setPlaceholderText("Nội dung sẽ hiển thị ở đây sau khi viết xong, có thể chỉnh sửa lại...")
-        self.review_text.setMinimumHeight(120)
-        self.content_step.set_extra_widget(self.review_text)
+        self.review_text.setMinimumHeight(200)
+        self.review_text.textChanged.connect(
+            lambda: self.facebook_preview.set_content(self.review_text.toPlainText())
+        )
+        self.review_tabs.addTab(self.review_text, "Chỉnh sửa")
 
     def _build_asset_step_extra(self) -> None:
+        media_panel = QWidget()
+        media_layout = QVBoxLayout(media_panel)
+        media_layout.setContentsMargins(0, 0, 0, 0)
+        self.image_selector = QComboBox()
+        self.image_selector.setAccessibleName("Xem ảnh trong bài viết")
+        self.image_selector.currentIndexChanged.connect(self._show_generated_image)
+        self.image_selector.hide()
+        media_layout.addWidget(self.image_selector)
         self.preview_label = MediaPreview("Ảnh hoặc video sẽ hiển thị tại đây sau khi tạo.")
         self.preview_label.setObjectName("mediaPreview")
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setMinimumHeight(160)
-        self.asset_step.set_extra_widget(self.preview_label)
+        self.preview_label.setMinimumHeight(200)
+        media_layout.addWidget(self.preview_label, 1)
+        self.review_tabs.addTab(media_panel, "Ảnh / video")
 
-    def _build_post_step_extra(self) -> None:
-        wrapper = QWidget()
-        wl = QVBoxLayout(wrapper)
-        wl.setContentsMargins(0, 0, 0, 0)
-        wl.setSpacing(8)
+    def _show_generated_image(self, index: int) -> None:
+        if 0 <= index < len(self._image_paths):
+            pixmap = QPixmap(str(self._image_paths[index]))
+            if not pixmap.isNull():
+                self.preview_label.setPixmap(pixmap)
 
-        self.pages_selector = PagesSelectorWidget()
-        wl.addWidget(self.pages_selector)
+    def _build_post_step_extra(self, wl: QVBoxLayout) -> None:
         self.destinations_label = QLabel("Nền tảng và quyền riêng tư lấy từ Cài đặt quy trình.")
         self.destinations_label.setWordWrap(True)
         wl.addWidget(self.destinations_label)
+        self.pages_selector = PagesSelectorWidget()
+        self.pages_selector.layout().setSpacing(6)
+        self.pages_selector.row_list.setFixedHeight(80)
+        page_actions = self.pages_selector.layout().itemAt(1).layout()
+        refresh_item = page_actions.takeAt(2)
+        page_actions.addWidget(refresh_item.widget(), 0, 2)
+        page_actions.setSpacing(4)
+        self.pages_selector.selection_changed.connect(self._update_facebook_identity)
+        wl.addWidget(self.pages_selector)
 
-        schedule_row = QVBoxLayout()
+        schedule_row = QHBoxLayout()
         self.schedule_check = QCheckBox("Lên lịch Facebook")
         self.schedule_check.toggled.connect(lambda checked: self.schedule_datetime.setEnabled(checked))
         schedule_row.addWidget(self.schedule_check)
         self.schedule_datetime = QDateTimeEdit(QDateTime.currentDateTime().addSecs(3600))
+        self.schedule_datetime.setDisplayFormat("dd/MM/yyyy HH:mm")
         self.schedule_datetime.setCalendarPopup(True)
         self.schedule_datetime.setEnabled(False)
-        schedule_row.addWidget(self.schedule_datetime)
+        self.schedule_check.toggled.connect(self._update_facebook_identity)
+        self.schedule_datetime.dateTimeChanged.connect(self._update_facebook_identity)
+        schedule_row.addWidget(self.schedule_datetime, 1)
         wl.addLayout(schedule_row)
 
         self.post_btn = QPushButton("Đăng bài")
@@ -157,12 +245,42 @@ class AutomationTab(QWidget):
         self.post_btn.setEnabled(False)
         self.post_btn.clicked.connect(self._on_post)
         wl.addWidget(self.post_btn)
-
         self.result_label = QLabel("")
         self.result_label.setWordWrap(True)
+        self.result_label.setTextFormat(Qt.TextFormat.PlainText)
         wl.addWidget(self.result_label)
 
-        self.post_step.set_extra_widget(wrapper)
+    def _update_facebook_identity(self, *_args) -> None:
+        names = self.pages_selector.selected_names()
+        scheduled = ""
+        settings = self._run_settings or config.load_settings()
+        if self.schedule_check.isChecked():
+            scheduled = self.schedule_datetime.dateTime().toString("dd/MM/yyyy HH:mm")
+        self.facebook_preview.set_page(names[0] if names else "Page Facebook", scheduled)
+
+    def _refresh_config_summary(self) -> None:
+        settings = self._run_settings or config.load_settings()
+        platforms = selected_platforms(settings)
+        attachment_labels = {ATTACHMENT_NONE: "Chỉ nội dung", ATTACHMENT_IMAGE: "Ảnh", ATTACHMENT_VIDEO: "Video"}
+        attachment_labels[ATTACHMENT_IMAGE] = f"{settings.get('automation_image_count', 1)} ảnh / bài"
+        mode = "Tự động đăng sau khi tạo" if settings.get("automation_auto_post", False) else "Duyệt trước khi đăng"
+        self.config_summary.setText(
+            "AI: " + PROVIDER_LABELS.get(settings.get("content_provider", "claude"), "AI")
+            + " · " + attachment_labels.get(settings.get("automation_attachment", ATTACHMENT_IMAGE), "Ảnh")
+            + "\nChế độ: " + mode
+        )
+        self.destinations_label.setText("Đăng lên: " + ", ".join(PLATFORM_LABELS[key] for key in platforms))
+        facebook = "facebook" in platforms
+        self.pages_selector.setVisible(facebook)
+        self.schedule_check.setVisible(facebook)
+        self.schedule_datetime.setVisible(facebook)
+        if self._run_settings is None:
+            self.pages_selector.set_selected_ids(settings.get("automation_facebook_page_ids", []))
+        self._update_facebook_identity()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._refresh_config_summary()
 
     def _on_open_settings(self) -> None:
         self.settings_requested.emit()
@@ -189,6 +307,7 @@ class AutomationTab(QWidget):
                 return
         self._run_settings = deepcopy(settings)
         self._run_topic = idea
+        self._refresh_config_summary()
         self._published_targets.clear()
         self.pages_selector.refresh()
         self.pages_selector.set_selected_ids(settings.get("automation_facebook_page_ids", []))
@@ -218,8 +337,13 @@ class AutomationTab(QWidget):
 
         self._content_text = ""
         self._image_path = None
+        self._image_paths = []
+        self.image_selector.clear()
+        self.image_selector.hide()
         self._video_path = None
+        self.review_tabs.setCurrentIndex(0)
         self.review_text.clear()
+        self.facebook_preview.set_media()
         self.preview_label.clear()
         self.preview_label.setText("")
         self.result_label.setText("")
@@ -229,7 +353,12 @@ class AutomationTab(QWidget):
         self.run_btn.setEnabled(False)
         self._active_step = self.content_step
         self.content_step.set_status(STATUS_ACTIVE, "Đang viết content...")
-        self.processing_dialog.start("Đang viết content...")
+        stages = [("content", "Viết content", "content"),
+                  ("asset", "Tạo video" if attachment == ATTACHMENT_VIDEO else "Tạo ảnh", "video" if attachment == ATTACHMENT_VIDEO else "image")]
+        if settings.get("automation_auto_post", False):
+            stages.extend((key, f"Đăng {PLATFORM_LABELS[key]}", key) for key in platforms)
+        self.processing_dialog.start("Đang viết content...", stages=stages)
+        self.processing_dialog.set_stage("content")
         self.log_message.emit(f"Bắt đầu quy trình tự động với {PROVIDER_LABELS[provider]}...", "info")
 
         self._worker = Worker(
@@ -254,18 +383,22 @@ class AutomationTab(QWidget):
         history_store.add_content(idea, content_text)
         self.content_step.set_status(STATUS_DONE, "Đã viết xong — có thể chỉnh sửa lại bên trên.")
         self.log_message.emit("Đã viết xong content.", "success")
+        self.processing_dialog.set_stage("content", "done")
 
         if attachment == ATTACHMENT_IMAGE:
+            self.processing_dialog.set_stage("asset")
             self._active_step = self.asset_step
             self.asset_step.set_status(STATUS_ACTIVE, "Đang tạo prompt ảnh...")
             self.processing_dialog.set_status("Đang tạo prompt ảnh...")
             self._run_image_step(provider, content_text)
         elif attachment == ATTACHMENT_VIDEO:
+            self.processing_dialog.set_stage("asset")
             self._active_step = self.asset_step
             self.asset_step.set_status(STATUS_ACTIVE, "Đang viết kịch bản video...")
             self.processing_dialog.set_status("Đang viết kịch bản video...")
             self._run_video_script_step(provider, content_text, avatar_id, voice_id)
         else:
+            self.processing_dialog.set_stage("asset", "skipped")
             self.asset_step.set_status(STATUS_SKIPPED, "Bỏ qua (không đính kèm ảnh/video).")
             self._finish_pipeline()
 
@@ -282,14 +415,24 @@ class AutomationTab(QWidget):
 
     def _after_image_prompt(self, prompt: str) -> None:
         self.log_message.emit(f"Đã có prompt ảnh: {prompt}", "info")
-        settings = config.load_settings()
+        self._image_prompt = prompt
+        self._generate_next_image()
+
+    def _generate_next_image(self) -> None:
+        settings = self._run_settings or config.load_settings()
+        count = max(1, min(10, int(settings.get("automation_image_count", 1))))
+        number = len(self._image_paths) + 1
+        prompt = self._image_prompt
+        if count > 1:
+            prompt += (f"\nCreate image {number} of {count} for the same social media post. "
+                       "Keep a consistent subject and visual style; use a distinct composition or viewpoint for this image.")
         try:
             image_client = ImageClient(config.get_secret("openai_api_key"), settings["openai_image_model"])
         except ValueError as exc:
             self._on_pipeline_error(str(exc))
             return
-        self.asset_step.set_status(STATUS_ACTIVE, "Đang tạo ảnh với OpenAI...")
-        self.processing_dialog.set_status("Đang tạo ảnh với OpenAI...")
+        self.asset_step.set_status(STATUS_ACTIVE, f"Đang tạo ảnh {number}/{count} với OpenAI…")
+        self.processing_dialog.set_status(f"Đang tạo ảnh {number}/{count} với OpenAI…")
         self._worker = Worker(
             image_client.generate_image, prompt=prompt, size="1024x1024", dest_dir=config.output_dir("images")
         )
@@ -298,13 +441,21 @@ class AutomationTab(QWidget):
         self._worker.start()
 
     def _after_image_done(self, prompt: str, path: Path) -> None:
-        self._image_path = path
+        self._image_paths.append(path)
+        self._image_path = self._image_paths[0]
         history_store.add_image(prompt, str(path))
-        pixmap = QPixmap(str(path))
-        if not pixmap.isNull():
-            self.preview_label.setPixmap(pixmap)
-        self.asset_step.set_status(STATUS_DONE, f"Đã tạo ảnh: {path.name}")
+        self.image_selector.addItem(f"Ảnh {len(self._image_paths)} · {path.name}")
+        self.image_selector.setCurrentIndex(len(self._image_paths) - 1)
+        self.image_selector.setVisible(len(self._image_paths) > 1)
         self.log_message.emit(f"Đã tạo ảnh: {path}", "success")
+        settings = self._run_settings or config.load_settings()
+        count = max(1, min(10, int(settings.get("automation_image_count", 1))))
+        self.facebook_preview.set_media(QPixmap(str(self._image_path)), image_count=len(self._image_paths))
+        if len(self._image_paths) < count:
+            self._generate_next_image()
+            return
+        self.asset_step.set_status(STATUS_DONE, f"Đã tạo đủ {count}/{count} ảnh cho bài viết.")
+        self.processing_dialog.set_stage("asset", "done")
         self._finish_pipeline()
 
     def _run_video_script_step(self, provider: str, content_text: str, avatar_id: str, voice_id: str) -> None:
@@ -359,13 +510,16 @@ class AutomationTab(QWidget):
         pixmap = QPixmap()
         if pixmap.loadFromData(data):
             self.preview_label.setPixmap(pixmap)
+            self.facebook_preview.set_media(pixmap, "Video đang được tạo")
 
     def _after_video_done(self, script: str, path: Path) -> None:
         self._video_path = path
         history_store.add_video(script, str(path))
         self.preview_label.setText(f"🎬 Video đã tạo:\n{path}")
+        self.facebook_preview.finish_video(path.name)
         self.asset_step.set_status(STATUS_DONE, f"Đã tạo video: {path.name}")
         self.log_message.emit(f"Đã tạo video: {path}", "success")
+        self.processing_dialog.set_stage("asset", "done")
         self._finish_pipeline()
 
     def _finish_pipeline(self) -> None:
@@ -389,7 +543,7 @@ class AutomationTab(QWidget):
         self.run_btn.setEnabled(True)
         target = self._active_step or self.content_step
         target.set_status(STATUS_ERROR, f"Lỗi: {message}")
-        self.processing_dialog.finish(f"Lỗi: {message}")
+        self.processing_dialog.finish(f"Lỗi: {message}", outcome="error")
         self.log_message.emit(f"Lỗi trong quy trình tự động: {message}", "error")
 
     # ---------- Posting ----------
@@ -411,7 +565,7 @@ class AutomationTab(QWidget):
         platforms = selected_platforms(settings)
         scheduled_time = None
         schedule_label = ""
-        if "facebook" in platforms and self.schedule_check.isChecked() and not auto:
+        if "facebook" in platforms and self.schedule_check.isChecked():
             dt: datetime = self.schedule_datetime.dateTime().toPython()
             if dt < datetime.now() + timedelta(minutes=10):
                 self._on_post_error("Facebook cần lịch đăng ít nhất 10 phút sau hiện tại.")
@@ -438,13 +592,20 @@ class AutomationTab(QWidget):
         self.schedule_datetime.setEnabled(False)
         self.result_label.clear()
         self.post_step.set_status(STATUS_ACTIVE, "Đang đăng bài theo cấu hình...")
-        self.processing_dialog.start("Đang đăng bài theo cấu hình...")
-        self._worker = Worker(publish_generated, settings=deepcopy(settings), message=message,
+        if auto and self.processing_dialog.scene.running:
+            self.processing_dialog.set_status("Đang đăng bài theo cấu hình...")
+        else:
+            stages = [(key, f"Đăng {PLATFORM_LABELS[key]}", key) for key in platforms]
+            self.processing_dialog.start("Đang đăng bài theo cấu hình...", stages=stages)
+        from app.core.automation_publisher import publish_and_archive
+        self._worker = Worker(publish_and_archive, settings=deepcopy(settings), message=message,
             topic=self._run_topic, pages=deepcopy(pages), image_path=self._image_path,
+            image_paths=list(self._image_paths) or None,
             video_path=self._video_path, scheduled_time=scheduled_time,
             skip_targets=set(self._published_targets))
         self._worker.progress.connect(lambda msg: self.post_step.set_status(STATUS_ACTIVE, msg))
         self._worker.progress.connect(self.processing_dialog.set_status)
+        self._worker.stage.connect(self.processing_dialog.set_stage)
         self._worker.finished.connect(lambda results: self._on_post_done(message, schedule_label, results))
         self._worker.error.connect(self._on_post_error)
         self._worker.start()
@@ -464,27 +625,38 @@ class AutomationTab(QWidget):
             name = result['name']
             if result['ok']:
                 self._published_targets.add(result['target'])
-                line = f"✓ {name}: thành công" + (f" (id={result['post_id']})" if result.get('post_id') else "")
+                outcome = f"đã nhận lịch {schedule_label}, chờ đăng" if schedule_label and result['platform'] == 'facebook' else "thành công"
+                line = f"✓ {name}: {outcome}" + (f" (id={result['post_id']})" if result.get('post_id') else "")
                 self.log_message.emit(line, "success")
             else:
                 line = f"✗ {name}: {result.get('error', 'Đăng thất bại')}"
+                if result.get('uncertain'):
+                    self._published_targets.add(result['target'])
+                    line += " · Tạm bỏ qua khi thử lại để tránh trùng bài; kiểm tra Page."
                 self.log_message.emit(line, "error")
             lines.append(line)
-            history_store.add_post(result['post_type'], message, result.get('attachment_path', ''),
-                schedule_label if result['platform'] == 'facebook' else '', result.get('post_id', ''),
-                page_id=result.get('id', ''), page_name=name, ok=result['ok'])
+            if result.get('archive_error'):
+                warning = f"{name}: đã xử lý đăng nhưng chưa lưu đủ vào kho: {result['archive_error']}"
+                lines.append(warning)
+                self.log_message.emit(warning, "error")
         failures = sum(not result['ok'] for result in results)
+        uncertain = sum(bool(result.get('uncertain')) for result in results)
         if not results:
-            summary = "Các nơi đã đăng thành công được bỏ qua để tránh đăng trùng."
+            summary = "Các nơi đã thành công hoặc chưa xác nhận được bỏ qua để tránh đăng trùng."
         else:
-            summary = f"Hoàn tất: {len(results) - failures} thành công, {failures} thất bại."
+            summary = f"Hoàn tất: {len(results) - failures} thành công, {failures - uncertain} thất bại."
+            if uncertain:
+                summary += f" {uncertain} bài chưa xác nhận; kiểm tra Page trước khi đăng lại."
+        archive_failures = sum(bool(result.get('archive_error')) for result in results)
+        if archive_failures:
+            summary += f" {archive_failures} bài chưa lưu đủ vào kho; xem chi tiết bên dưới."
         self.post_step.set_status(STATUS_ERROR if failures else STATUS_DONE, summary)
-        self.processing_dialog.finish(summary)
+        self.processing_dialog.finish(summary, outcome="error" if failures else "done")
         self.result_label.setText("\n".join(lines) or summary)
 
     def _on_post_error(self, message: str) -> None:
         self._unlock_posting()
         self.post_step.set_status(STATUS_ERROR, f"Lỗi: {message}")
-        self.processing_dialog.finish(f"Lỗi đăng bài: {message}")
+        self.processing_dialog.finish(f"Lỗi đăng bài: {message}", outcome="error")
         self.result_label.setText(message)
         self.log_message.emit(f"Lỗi đăng bài: {message}", "error")

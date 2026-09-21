@@ -20,12 +20,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.facebook_client import post_to_pages
-from app.storage import history_store
+from app.core.facebook_schedule import post_and_record
 from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import arrange_cards
 from app.ui.widgets.pages_selector import PagesSelectorWidget
 from app.workers.async_worker import Worker
+from app.ui.widgets.processing_dialog import ProcessingDialog
 
 ATTACHMENT_NONE = "Không đính kèm (chỉ text/link)"
 ATTACHMENT_IMAGE = "Ảnh"
@@ -34,13 +34,16 @@ ATTACHMENT_VIDEO = "Video"
 
 class FacebookTab(QWidget):
     log_message = Signal(str, str)
+    schedules_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._posting = False
         self._image_path: Path | None = None
         self._video_path: Path | None = None
         self._worker: Worker | None = None
         self._build_ui()
+        self.processing_dialog = ProcessingDialog(self)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -101,6 +104,9 @@ class FacebookTab(QWidget):
         layout.addWidget(self.result_label)
         self.message_input.setMinimumHeight(160)
         arrange_cards(layout, [("Nội dung bài đăng", [1, 2, 3, 4]), ("Xuất bản", [0, 5, 6, 7, 8, 9, 10])])
+        self.schedules_btn = QPushButton("Quản lý lịch đăng Facebook")
+        self.schedules_btn.clicked.connect(self.schedules_requested.emit)
+        layout.addWidget(self.schedules_btn)
 
     # ---------- Attachments ----------
 
@@ -140,15 +146,17 @@ class FacebookTab(QWidget):
     # ---------- Posting ----------
 
     def _on_post(self) -> None:
+        if self._posting:
+            return
         message = self.message_input.toPlainText().strip()
         attachment = self.attachment_combo.currentText()
-        if not message and attachment == ATTACHMENT_NONE:
+        if not message and not self.link_input.text().strip() and attachment == ATTACHMENT_NONE:
             self.log_message.emit("Vui lòng nhập nội dung bài đăng.", "error")
             return
-        if attachment == ATTACHMENT_IMAGE and not self._image_path:
+        if attachment == ATTACHMENT_IMAGE and (not self._image_path or not self._image_path.is_file()):
             self.log_message.emit("Chưa chọn ảnh để đăng.", "error")
             return
-        if attachment == ATTACHMENT_VIDEO and not self._video_path:
+        if attachment == ATTACHMENT_VIDEO and (not self._video_path or not self._video_path.is_file()):
             self.log_message.emit("Chưa chọn video để đăng.", "error")
             return
 
@@ -180,7 +188,7 @@ class FacebookTab(QWidget):
             if confirm != QMessageBox.StandardButton.Yes:
                 return
 
-        self.post_btn.setEnabled(False)
+        self._set_posting(True)
         self.log_message.emit(f"Đang đăng bài lên {len(pages)} Page...", "info")
         self.result_label.setText("")
         self.status_label.setText(f"Đang chuẩn bị đăng lên {len(pages)} Page...")
@@ -199,41 +207,51 @@ class FacebookTab(QWidget):
                 "scheduled_time": scheduled_time,
             }
 
-        self._worker = Worker(post_to_pages, pages=pages, post_type=post_type, **kwargs)
+        attachment_path = str(self._image_path or "") if post_type == "photo" else str(self._video_path or "") if post_type == "video" else ""
+        self._worker = Worker(post_and_record, pages=pages, post_type=post_type, content=message,
+                              attachment_path=attachment_path, **kwargs)
         self._worker.progress.connect(lambda msg: self.status_label.setText(msg))
         self._worker.finished.connect(lambda results: self._on_done(post_type, message, schedule_label, results))
         self._worker.error.connect(self._on_error)
+        self.processing_dialog.track(self._worker, f"Đang đăng bài lên {len(pages)} Page Facebook...")
         self._worker.start()
 
     def _on_done(self, post_type: str, message: str, schedule_label: str, results: list[dict]) -> None:
-        self.post_btn.setEnabled(True)
-        attachment_path = str(self._image_path or self._video_path or "")
+        self._set_posting(False)
 
         ok_count = sum(1 for r in results if r["ok"])
-        fail_count = len(results) - ok_count
+        uncertain_count = sum(bool(r.get("uncertain")) for r in results)
+        fail_count = len(results) - ok_count - uncertain_count
         lines = []
         for r in results:
             if r["ok"]:
-                lines.append(f"✓ {r['name']}: thành công (id={r['post_id']})")
-                self.log_message.emit(f"Đăng '{r['name']}' thành công (id={r['post_id']}).", "success")
+                outcome = f"đã nhận lịch {schedule_label}, chờ đăng" if schedule_label else "đăng thành công"
+                lines.append(f"✓ {r['name']}: {outcome} (id={r['post_id']})")
+                self.log_message.emit(f"{r['name']}: {outcome} (id={r['post_id']}).", "success")
             else:
-                lines.append(f"✗ {r['name']}: {r['error']}")
-                self.log_message.emit(f"Đăng '{r['name']}' thất bại: {r['error']}", "error")
-            history_store.add_post(
-                post_type,
-                message,
-                attachment_path,
-                schedule_label,
-                r.get("post_id", ""),
-                page_id=r["id"],
-                page_name=r["name"],
-                ok=r["ok"],
-            )
+                outcome = "chưa xác nhận" if r.get("uncertain") else "thất bại"
+                lines.append(f"✗ {r['name']}: {outcome}: {r['error']}")
+                self.log_message.emit(f"Đăng '{r['name']}' {outcome}: {r['error']}", "error")
+            if r.get("archive_error"):
+                warning = f"{r['name']}: chưa lưu đầy đủ vào kho/lịch: {r['archive_error']}"
+                lines.append(warning)
+                self.log_message.emit(warning, "error")
 
-        self.status_label.setText(f"Hoàn tất: {ok_count} thành công, {fail_count} thất bại.")
+        self.status_label.setText(f"Lên lịch: {ok_count} được nhận, {fail_count} thất bại. Xem Quản lý lịch đăng Facebook để kiểm tra trạng thái."
+                                 if schedule_label else f"Hoàn tất: {ok_count} thành công, {fail_count} thất bại.")
         self.result_label.setText("\n".join(lines))
+        if uncertain_count:
+            self.status_label.setText(self.status_label.text() + f" {uncertain_count} bài chưa xác nhận; kiểm tra Page trước khi thử lại.")
+
+    def _set_posting(self, busy):
+        self._posting = busy
+        self.message_input.setReadOnly(busy)
+        for widget in (self.post_btn, self.link_input, self.attachment_combo, self.browse_btn,
+                       self.pages_selector, self.schedule_check):
+            widget.setEnabled(not busy)
+        self.schedule_datetime.setEnabled(not busy and self.schedule_check.isChecked())
 
     def _on_error(self, message: str) -> None:
-        self.post_btn.setEnabled(True)
+        self._set_posting(False)
         self.status_label.setText("Đăng bài thất bại.")
         self.log_message.emit(f"Lỗi đăng bài: {message}", "error")

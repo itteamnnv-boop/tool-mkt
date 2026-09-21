@@ -16,6 +16,7 @@ class Worker(QThread):
     error = Signal(str)
     progress = Signal(str)
     thumbnail = Signal(str)
+    stage = Signal(str, str)
     cancelled = Signal()
 
     def __init__(self, fn: Callable[..., Any], *args, **kwargs):
@@ -31,6 +32,8 @@ class Worker(QThread):
             self._kwargs.setdefault("on_progress", lambda msg: self.progress.emit(str(msg)))
         if "on_thumbnail" in params:
             self._kwargs.setdefault("on_thumbnail", lambda url: self.thumbnail.emit(str(url)))
+        if "on_stage" in params:
+            self._kwargs.setdefault("on_stage", lambda key, state: self.stage.emit(str(key), str(state)))
         self.finished.connect(self._release_when_stopped)
         self.error.connect(self._release_when_stopped)
         self.cancelled.connect(self._release_when_stopped)

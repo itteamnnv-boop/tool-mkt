@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 from app.ui.widgets.liquid_glass import GlassCard
 
 _PATHS = {
+    "archive": '<rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v13h14V8M9 12h6"/>',
     "minimize": '<path d="M5 12h14"/>',
     "maximize": '<rect x="5" y="5" width="14" height="14" rx="2"/>',
     "close": '<path d="m6 6 12 12M18 6 6 18"/>',
@@ -20,6 +21,7 @@ _PATHS = {
     "video": '<rect x="3" y="5" width="18" height="14" rx="4"/><path d="m10 9 5 3-5 3z"/>',
     "gallery": '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>',
     "facebook": '<path d="m3 11 18-8-6 18-4-7-8-3zM11 14 21 3"/>',
+    "facebook_schedule": '<rect x="3" y="5" width="18" height="16" rx="4"/><path d="M7 2v6M17 2v6M3 11h18M8 15h1M15 15h1"/>',
     "facebook_connect": '<path d="m10 14 4-4M8 16l-1 1a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0M16 8l1-1a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0" transform="translate(1 0) scale(.9)"/>',
     "tiktok": '<circle cx="11" cy="17" r="3"/><path d="M14 17V5l6 2"/>',
     "tiktok_connect": '<path d="m10 14 4-4M8 16l-1 1a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0M16 8l1-1a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0" transform="translate(1 0) scale(.9)"/>',

@@ -82,7 +82,7 @@ def add_post(
     ok: bool = True,
 ) -> None:
     _fire_and_forget(
-        _backend().add_post,
+        save_post,
         post_type,
         message,
         attachment_path,
@@ -92,6 +92,41 @@ def add_post(
         page_name,
         ok,
     )
+
+
+def save_post(post_type, message, attachment_path="", scheduled_time="", facebook_post_id="",
+              page_id="", page_name="", ok=True, error="", uncertain=False, link_url=""):
+    """Acknowledged archive write. Call from a worker for large media files."""
+    from app.storage.post_assets import snapshot
+    row = dict(post_type=post_type, message=message, attachment_path=attachment_path,
+               scheduled_time=scheduled_time, facebook_post_id=facebook_post_id,
+               page_id=page_id, page_name=page_name, ok=ok, error=error, uncertain=uncertain, link_url=link_url)
+    if ok:
+        try:
+            row = snapshot(row)
+        except Exception:
+            # Keep the successful remote ID even when disk space/copying fails.
+            _backend().add_post(**row)
+            raise
+    _backend().add_post(**row)
+
+
+def save_post_draft(row, message):
+    _backend().update_post_fields(row.get("id", row.get("_id")), {"draft_message": message})
+
+
+def mark_post_updated(row, message):
+    import json
+    fields = {"message": message, "draft_message": None}
+    if row.get("schedule_status"):
+        try:
+            state = json.loads(row["schedule_status"])
+            if isinstance(state, dict):
+                state["message"] = message
+                fields["schedule_status"] = json.dumps(state, ensure_ascii=False)
+        except (TypeError, ValueError):
+            pass
+    _backend().update_post_fields(row.get("id", row.get("_id")), fields)
 
 
 def add_token_usage(
@@ -112,3 +147,22 @@ def delete_item(table: str, item_id) -> None:
     """Remove one history record. Runs synchronously (unlike the add_* writes above) so the
     caller can confirm the delete actually happened before updating the gallery UI."""
     _backend().delete_item(table, item_id)
+
+
+def list_contents(query: str = "", limit: int = 50, offset: int = 0) -> list[dict]:
+    """Search the full content archive, one page at a time."""
+    return _backend().list_contents(query, limit, offset)
+
+
+def list_successful_posts(query: str = "", limit: int = 50, offset: int = 0) -> list[dict]:
+    return _backend().list_successful_posts(query, limit, offset)
+
+
+def list_scheduled_posts(query="", limit=30, offset=0):
+    return _backend().list_scheduled_posts(query, limit, offset)
+
+
+def save_schedule_status(row, status):
+    import json
+    _backend().update_post_fields(row.get("id", row.get("_id")),
+                                  {"schedule_status": json.dumps(status, ensure_ascii=False)})

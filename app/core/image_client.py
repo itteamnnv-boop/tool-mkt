@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import time
+from uuid import uuid4
 from pathlib import Path
 
 import requests
@@ -36,7 +37,7 @@ class ImageClient:
             )
         item = response.data[0]
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest_path = dest_dir / f"image_{int(time.time())}.png"
+        dest_path = dest_dir / f"image_{int(time.time())}_{uuid4().hex[:10]}.png"
 
         b64_data = getattr(item, "b64_json", None)
         if b64_data:

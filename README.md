@@ -149,6 +149,40 @@ và bấm **Đăng bài** để đăng lên các Page đã chọn.
    **Đăng bài**. Bước xác nhận cuối này được giữ lại có chủ đích — để bạn luôn nhìn thấy nội dung thật
    trước khi nó lên Facebook công khai, tránh trường hợp AI viết sai mà không ai kiểm tra trước khi đăng.
 
+## Kho bài viết đã đăng
+
+- Sau khi quy trình tự động đăng thành công, ứng dụng lưu nội dung, mã bài, nơi đăng và bản sao riêng của tất cả ảnh/video đính kèm vào kho. Mỗi nơi đăng có một bản ghi; nơi đăng thất bại không xuất hiện trong danh sách thành công.
+- Chọn **Kho bài viết đã đăng** trên thanh điều hướng, bấm một bài để mở dialog xem trước điện thoại. Chọn từng ảnh để xem đủ album; video có nút phát/tạm dừng và mở bằng ứng dụng trên máy.
+- **Lưu bản chỉnh sửa** giữ bản nháp qua lần khởi động sau, chưa thay đổi bài trên nền tảng. **Đăng lại thành bài mới** dùng nội dung đang sửa cùng toàn bộ tệp trong kho. Facebook đăng vào Page gốc; TikTok/YouTube dùng tài khoản đang kết nối và quyền riêng tư trong cài đặt, hiển thị trước khi xác nhận.
+- **Cập nhật nội dung bài gốc** sửa chữ/mô tả trên Facebook hoặc YouTube, giữ nguyên ảnh/video. YouTube giữ tiêu đề, tag và quyền riêng tư; có thể cần kết nối lại để cấp quyền sửa video theo [YouTube videos.update](https://developers.google.com/youtube/v3/docs/videos/update). TikTok hiện chỉ hỗ trợ đăng lại trong ứng dụng này.
+- Tệp nằm trong thư mục dữ liệu ứng dụng `published_posts`, kèm `post.json` lưu thông tin gốc. MongoDB lưu bản ghi, còn tệp vẫn nằm trên máy hiện tại. Khi chuyển máy cần sao lưu cả thư mục này. Bài cũ vẫn đọc được nhưng các đường dẫn trước khi có tính năng này không tự khôi phục tệp đã mất.
+- Nếu đã đăng thành công nhưng sao chép tệp/lưu kho gặp lỗi, ứng dụng báo rõ và không tự đăng lại bài đó. Bài lên lịch được ghi rõ thời gian, không coi là đã phát hành ngay.
+
+## Quản lý lịch đăng Facebook
+
+Mở **Quản lý → Lịch đăng Facebook** hoặc nút **Quản lý lịch đăng Facebook** trong màn hình Đăng Facebook.
+Danh sách gồm các lịch đã tạo bằng ứng dụng (cả đăng thủ công và quy trình tự động), nội dung, Page,
+giờ hẹn theo múi giờ máy và trạng thái. Chọn bài để đọc đầy đủ, xem ảnh/video hoặc mở trên Facebook.
+
+- **Chờ đăng — chưa xác minh**: Facebook đã nhận yêu cầu lên lịch, chưa lấy trạng thái mới.
+- **Chờ đăng**: lần kiểm tra gần nhất xác nhận chưa xuất bản và chưa tới giờ hẹn.
+- **Đã đến giờ — cần kiểm tra / chưa đăng**: đã tới giờ; cần xác minh hoặc Facebook vẫn báo chưa xuất bản.
+- **Đã đăng**: Facebook xác nhận đã xuất bản; màn hình ghi thời điểm xác minh gần nhất.
+- **Lên lịch thất bại**: yêu cầu tạo lịch bị từ chối, kèm lý do nếu có.
+
+Dùng **Kiểm tra bài đang chọn** hoặc **Cập nhật trạng thái trang này** để đọc trạng thái từ Facebook.
+Ô hẹn giờ Facebook cũng được áp dụng khi quy trình tự động đăng sau lúc tạo nội dung; nếu giờ hẹn
+không còn cách thời điểm gửi ít nhất 10 phút, ứng dụng dừng và yêu cầu chọn giờ mới. TikTok/YouTube
+vẫn đăng ngay theo cấu hình. Link đính kèm được giữ trong kho khi đăng lại bài Facebook.
+Nếu kết nối bị ngắt hoặc Facebook không trả mã bài, trạng thái là **Chưa xác nhận — kiểm tra Page**;
+quy trình tự động tạm bỏ qua đích đó khi thử lại để tránh đăng trùng.
+Kết quả được lưu lại; lỗi mạng/token/quyền truy cập được báo riêng và không bị coi là thất bại xuất bản.
+Màn hình không tự suy ra “Đã đăng” chỉ vì đã qua giờ hẹn, không tự đăng lại, và không nhập các lịch
+tạo ngoài ứng dụng. Các trường trạng thái dựa trên SDK chính thức của Meta:
+[Post](https://github.com/facebook/facebook-python-business-sdk/blob/main/facebook_business/adobjects/post.py),
+[Video](https://github.com/facebook/facebook-python-business-sdk/blob/main/facebook_business/adobjects/advideo.py).
+Client Facebook sử dụng Graph API v26.0, khớp [cấu hình SDK chính thức](https://github.com/facebook/facebook-python-business-sdk/blob/main/facebook_business/apiconfig.py).
+
 ## Ghi chú bảo mật
 
 - Toàn bộ API key/token — kể cả token riêng của từng Facebook Page và access/refresh token
@@ -170,4 +204,3 @@ và bấm **Đăng bài** để đăng lên các Page đã chọn.
 - TikTok và YouTube: chỉ hỗ trợ đăng **video** (không hỗ trợ ảnh/carousel), chỉ kết nối được **1 tài
   khoản/kênh** mỗi loại (không hỗ trợ nhiều tài khoản như Facebook), và không hỗ trợ lên lịch đăng —
   đăng là lên ngay lập tức.
-

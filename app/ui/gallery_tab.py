@@ -4,10 +4,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal, QUrl
+from PySide6.QtCore import Qt, Signal, QUrl, QEvent, QTimer
 from PySide6.QtGui import QPixmap, QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
+    QLineEdit,
+    QMenu,
+    QSizePolicy,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -22,8 +25,7 @@ from app.storage import history_store
 from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.liquid_glass import GlassCard
 
-COLUMNS = 4
-CARD_WIDTH = 210
+CARD_WIDTH = 260
 ITEMS_PER_TABLE = 60
 
 FILTER_ALL = "all"
@@ -70,92 +72,100 @@ class _GalleryCard(GlassCard):
         self.item_id = item_id
         self.file_path = file_path
         self.setObjectName("card")
-        self.setFixedWidth(CARD_WIDTH)
-
+        self.setMinimumWidth(CARD_WIDTH)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(6)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        meta = QHBoxLayout()
+        badge = QLabel("ẢNH" if kind == "image" else "VIDEO")
+        badge.setObjectName("mutedHint")
+        meta.addWidget(badge)
+        meta.addStretch()
+        more = QPushButton("⋯")
+        more.setObjectName("linkButton")
+        more.setFixedWidth(40)
+        more.setToolTip("Tuỳ chọn tệp")
+        more.setAccessibleName("Tuỳ chọn tệp")
+        more_menu = QMenu(more)
+        more_menu.addAction("Xoá khỏi bộ sưu tập", self._on_remove_from_history)
+        more_menu.addSeparator()
+        delete_action = more_menu.addAction("Xoá vĩnh viễn tệp…", self._on_delete_file)
+        delete_action.setEnabled(file_path.is_file())
+        more.setMenu(more_menu)
+        meta.addWidget(more)
+        layout.addLayout(meta)
 
         self.thumb = QLabel()
         self.thumb.setObjectName("mediaPreview")
-        self.thumb.setFixedSize(CARD_WIDTH - 20, 130)
+        self.thumb.setFixedHeight(190)
+        self.thumb.setMinimumWidth(0)
+        self.thumb.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._pixmap = QPixmap(str(file_path)) if kind == "image" and file_path.is_file() else QPixmap()
         self._load_thumbnail()
         layout.addWidget(self.thumb)
 
-        date_label = QLabel(created_at)
+        caption_text = caption.strip() or file_path.name or "Chưa có mô tả"
+        self.caption_label = QLabel()
+        self.caption_label.setFixedHeight(42)
+        self.caption_label.setWordWrap(False)
+        self.caption_label.setToolTip(caption_text)
+        self._caption = " ".join(caption_text.split())
+        layout.addWidget(self.caption_label)
+        date_label = QLabel(created_at[:16])
         date_label.setObjectName("mutedHint")
         layout.addWidget(date_label)
-
-        caption_text = caption.strip() or "(không có mô tả)"
-        caption_label = QLabel(caption_text[:140] + ("…" if len(caption_text) > 140 else ""))
-        caption_label.setWordWrap(True)
-        caption_label.setMaximumHeight(60)
-        caption_label.setToolTip(caption_text)
-        layout.addWidget(caption_label)
-
-        exists = file_path.exists()
+        self.setToolTip(str(file_path))
+        exists = file_path.is_file()
         if not exists:
-            missing = QLabel("⚠ Không tìm thấy file (có thể đã bị xoá hoặc di chuyển).")
-            missing.setObjectName("mutedHint")
-            missing.setWordWrap(True)
-            layout.addWidget(missing)
+            date_label.setText("Không tìm thấy tệp trên máy")
 
-        open_btn = QPushButton("Mở")
+        actions = QHBoxLayout()
+        open_btn = QPushButton("Mở tệp")
+        open_btn.setObjectName("linkButton")
         open_btn.setEnabled(exists)
         open_btn.clicked.connect(self._on_open)
-        layout.addWidget(open_btn)
-
-        post_btn = QPushButton("→ Dùng để đăng Facebook")
-        post_btn.setObjectName("linkButton")
-        post_btn.setEnabled(exists)
-        post_btn.clicked.connect(lambda: self.use_for_post.emit(self.file_path, self.kind))
-        layout.addWidget(post_btn)
-
+        actions.addWidget(open_btn)
+        use_btn = QPushButton("Sử dụng")
+        use_btn.setObjectName("primaryButton")
+        use_btn.setEnabled(exists)
+        use_menu = QMenu(use_btn)
+        use_menu.addAction("Đăng Facebook", lambda: self.use_for_post.emit(self.file_path, self.kind))
         if kind == "video":
-            tiktok_btn = QPushButton("→ Dùng để đăng TikTok")
-            tiktok_btn.setObjectName("linkButton")
-            tiktok_btn.setEnabled(exists)
-            tiktok_btn.clicked.connect(lambda: self.use_for_tiktok.emit(self.file_path))
-            layout.addWidget(tiktok_btn)
+            use_menu.addAction("Đăng TikTok", lambda: self.use_for_tiktok.emit(self.file_path))
+            use_menu.addAction("Đăng YouTube", lambda: self.use_for_youtube.emit(self.file_path))
+        else:
+            use_menu.addAction("Làm vật liệu video", lambda: self.use_for_video_material.emit(self.file_path))
+        use_btn.setMenu(use_menu)
+        actions.addWidget(use_btn, 1)
+        layout.addLayout(actions)
 
-            youtube_btn = QPushButton("→ Dùng để đăng YouTube")
-            youtube_btn.setObjectName("linkButton")
-            youtube_btn.setEnabled(exists)
-            youtube_btn.clicked.connect(lambda: self.use_for_youtube.emit(self.file_path))
-            layout.addWidget(youtube_btn)
-
-        if kind == "image":
-            material_btn = QPushButton("→ Dùng làm vật liệu Video")
-            material_btn.setObjectName("linkButton")
-            material_btn.setEnabled(exists)
-            material_btn.clicked.connect(lambda: self.use_for_video_material.emit(self.file_path))
-            layout.addWidget(material_btn)
-
-        remove_btn = QPushButton("🗑 Xoá khỏi bộ sưu tập")
-        remove_btn.setObjectName("linkButton")
-        remove_btn.clicked.connect(self._on_remove_from_history)
-        layout.addWidget(remove_btn)
-
-        delete_file_btn = QPushButton("Xoá vĩnh viễn cả file trên máy")
-        delete_file_btn.setEnabled(exists)
-        delete_file_btn.clicked.connect(self._on_delete_file)
-        layout.addWidget(delete_file_btn)
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._load_thumbnail()
+        # Two fully visible lines, with an ellipsis instead of a clipped paragraph.
+        metrics = self.caption_label.fontMetrics()
+        width = max(1, self.width() - 48)
+        words = self._caption.split()
+        first = ""
+        while words and metrics.horizontalAdvance((first + " " + words[0]).strip()) <= width:
+            first = (first + " " + words.pop(0)).strip()
+        if not first and words:
+            first = metrics.elidedText(words.pop(0), Qt.TextElideMode.ElideRight, width)
+        second = metrics.elidedText(" ".join(words), Qt.TextElideMode.ElideRight, width)
+        self.caption_label.setText(first + ("\n" + second if second else ""))
 
     def _load_thumbnail(self) -> None:
-        if self.kind == "image" and self.file_path.exists():
-            pixmap = QPixmap(str(self.file_path))
-            if not pixmap.isNull():
-                self.thumb.setPixmap(
-                    pixmap.scaled(
-                        self.thumb.width() - 8,
-                        self.thumb.height() - 8,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                )
-                return
-        self.thumb.setText("🎬 Video" if self.kind == "video" else "🖼️ Ảnh (không xem trước được)")
+        if not self._pixmap.isNull():
+            self.thumb.setPixmap(self._pixmap.scaled(
+                max(1, self.thumb.width() - 12), 178,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+        else:
+            self.thumb.setText("▶\nVideo" if self.kind == "video" else "Không có ảnh xem trước")
 
     def _on_open(self) -> None:
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.file_path.resolve()))):
@@ -216,101 +226,144 @@ class GalleryTab(QWidget):
         self.refresh()
 
     def _build_ui(self) -> None:
+        self._items = []
+        self._cards = []
+        self._columns = 0
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
-
-        header_row = QHBoxLayout()
-        header_row.addWidget(
-            make_page_header("📚 Bộ sưu tập", "Xem lại, tái sử dụng hoặc xoá ảnh/video đã tạo."), 1
-        )
+        layout.addWidget(make_page_header(
+            "Bộ sưu tập", "Không gian lưu giữ ý tưởng. Chọn ảnh hoặc video để tiếp tục sáng tạo."
+        ))
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(10)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Tìm theo mô tả hoặc tên tệp…")
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.setMinimumWidth(120)
+        self.search_input.setAccessibleName("Tìm trong bộ sưu tập")
+        toolbar.addWidget(self.search_input, 1)
         self.filter_combo = QComboBox()
         self.filter_combo.addItem("Tất cả", FILTER_ALL)
         self.filter_combo.addItem("Ảnh", FILTER_IMAGES)
         self.filter_combo.addItem("Video", FILTER_VIDEOS)
-        self.filter_combo.currentIndexChanged.connect(self.refresh)
-        header_row.addWidget(self.filter_combo)
-        self.refresh_btn = QPushButton("↻ Làm mới")
+        toolbar.addWidget(self.filter_combo)
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItem("Mới nhất", True)
+        self.sort_combo.addItem("Cũ nhất", False)
+        toolbar.addWidget(self.sort_combo)
+        self.refresh_btn = QPushButton("Làm mới")
         self.refresh_btn.setObjectName("linkButton")
         self.refresh_btn.clicked.connect(self.refresh)
-        header_row.addWidget(self.refresh_btn)
-        layout.addLayout(header_row)
-
-        self.summary_label = QLabel("")
+        toolbar.addWidget(self.refresh_btn)
+        layout.addLayout(toolbar)
+        self.summary_label = QLabel()
         self.summary_label.setObjectName("mutedHint")
+        self.summary_label.setWordWrap(True)
         layout.addWidget(self.summary_label)
-
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setMinimumHeight(300)
         container = QWidget()
+        container.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.grid = QGridLayout(container)
-        self.grid.setSpacing(14)
-        self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.grid.setContentsMargins(0, 0, 8, 0)
+        self.grid.setSpacing(16)
+        self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.scroll.setWidget(container)
         layout.addWidget(self.scroll, 1)
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._arrange_cards)
+        self.scroll.viewport().installEventFilter(self)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(180)
+        self._search_timer.timeout.connect(self._render_items)
+        self.search_input.textChanged.connect(lambda: self._search_timer.start())
+        self.filter_combo.currentIndexChanged.connect(self._render_items)
+        self.sort_combo.currentIndexChanged.connect(self._render_items)
+
+    def eventFilter(self, watched, event):
+        if watched is self.scroll.viewport() and event.type() == QEvent.Type.Resize:
+            self._resize_timer.start(0)
+        return super().eventFilter(watched, event)
 
     def refresh(self) -> None:
-        self._clear_grid()
-        selected = self.filter_combo.currentData() or FILTER_ALL
+        try:
+            images = history_store.list_recent("images", ITEMS_PER_TABLE)
+            videos = history_store.list_recent("videos", ITEMS_PER_TABLE)
+        except Exception as exc:
+            self.summary_label.setText("Không tải được bộ sưu tập. Hãy thử làm mới.")
+            self.log_message.emit(f"Không tải được bộ sưu tập: {exc}", "error")
+            return
+        self._items = [("image", "images", item) for item in images]
+        self._items += [("video", "videos", item) for item in videos]
+        self._render_items()
 
-        images = history_store.list_recent("images", ITEMS_PER_TABLE) if selected != FILTER_VIDEOS else []
-        videos = history_store.list_recent("videos", ITEMS_PER_TABLE) if selected != FILTER_IMAGES else []
-        self.summary_label.setText(f"{len(images)} ảnh  •  {len(videos)} video (tối đa {ITEMS_PER_TABLE} mục gần nhất mỗi loại)")
-
-        row = 0
-        if selected != FILTER_VIDEOS:
-            row = self._add_section("🖼️ Ảnh đã tạo", "images", "image", images, row)
-        if selected != FILTER_IMAGES:
-            row = self._add_section("🎬 Video đã tạo", "videos", "video", videos, row)
-        if row == 0:
-            empty = QLabel("Chưa có ảnh hoặc video nào được tạo.")
-            empty.setObjectName("mutedHint")
-            self.grid.addWidget(empty, 0, 0, 1, COLUMNS)
-
-    def _add_section(self, title: str, table: str, kind: str, items: list, start_row: int) -> int:
-        header = QLabel(title)
-        header.setObjectName("cardTitle")
-        self.grid.addWidget(header, start_row, 0, 1, COLUMNS)
-        row = start_row + 1
-
-        if not items:
-            empty = QLabel("Chưa có mục nào.")
-            empty.setObjectName("mutedHint")
-            self.grid.addWidget(empty, row, 0, 1, COLUMNS)
-            return row + 1
-
-        col = 0
-        caption_key = "prompt" if kind == "image" else "script"
-        for item in items:
-            card = _GalleryCard(
-                kind=kind,
-                table=table,
-                item_id=_row_id(item),
-                created_at=_format_created_at(_row_get(item, "created_at")),
-                caption=str(_row_get(item, caption_key)),
-                file_path=Path(str(_row_get(item, "file_path"))),
-            )
+    def _render_items(self) -> None:
+        while self.grid.count():
+            widget = self.grid.takeAt(0).widget()
+            if widget:
+                widget.hide()
+                widget.deleteLater()
+        self._cards = []
+        selected = self.filter_combo.currentData()
+        query = self.search_input.text().strip().casefold()
+        items = []
+        for kind, table, item in self._items:
+            caption = str(_row_get(item, "prompt" if kind == "image" else "script"))
+            path = Path(str(_row_get(item, "file_path")))
+            if selected != FILTER_ALL and table != selected:
+                continue
+            if query and query not in (caption + " " + path.name).casefold():
+                continue
+            items.append((kind, table, item, caption, path))
+        items.sort(key=lambda entry: _format_created_at(_row_get(entry[2], "created_at")),
+                   reverse=bool(self.sort_combo.currentData()))
+        image_count = sum(kind == "image" for kind, _, _ in self._items)
+        video_count = len(self._items) - image_count
+        self.summary_label.setText(
+            f"{len(items)} mục hiển thị  ·  {image_count} ảnh / {video_count} video"
+            f"  ·  {ITEMS_PER_TABLE} mục gần nhất mỗi loại"
+        )
+        for kind, table, item, caption, path in items:
+            card = _GalleryCard(kind, table, _row_id(item),
+                                _format_created_at(_row_get(item, "created_at")), caption, path)
             card.use_for_post.connect(self._on_use_for_post)
             card.use_for_video_material.connect(self.use_for_video_material)
             card.use_for_tiktok.connect(self.use_for_tiktok_video)
             card.use_for_youtube.connect(self.use_for_youtube_video)
             card.removed_from_history.connect(lambda *_args: self.refresh())
             card.log_message.connect(self.log_message)
-            self.grid.addWidget(card, row, col)
-            col += 1
-            if col >= COLUMNS:
-                col = 0
-                row += 1
-        if col != 0:
-            row += 1
-        return row + 1
+            self._cards.append(card)
+        if not items:
+            empty = QLabel(
+                "Chưa có ảnh hoặc video\nTạo nội dung đầu tiên để bắt đầu bộ sưu tập của bạn."
+                if not self._items else
+                "Không tìm thấy nội dung phù hợp\nThử từ khoá khác hoặc chọn Tất cả."
+            )
+            empty.setObjectName("mutedHint")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setMinimumHeight(240)
+            self.grid.addWidget(empty, 0, 0)
+        self._arrange_cards()
 
-    def _clear_grid(self) -> None:
-        while self.grid.count():
-            item = self.grid.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+    def _arrange_cards(self) -> None:
+        columns = max(1, (self.scroll.viewport().width() - 8 + 16) // (CARD_WIDTH + 16))
+        for column in range(max(self._columns, columns)):
+            self.grid.setColumnStretch(column, 0)
+            self.grid.setColumnMinimumWidth(column, 0)
+        self._columns = columns
+        for card in self._cards:
+            self.grid.removeWidget(card)
+        for index, card in enumerate(self._cards):
+            self.grid.addWidget(card, index // columns, index % columns)
+        if self._cards:
+            for column in range(columns):
+                self.grid.setColumnStretch(column, 1)
 
     def _on_use_for_post(self, path: Path, kind: str) -> None:
         if kind == "image":

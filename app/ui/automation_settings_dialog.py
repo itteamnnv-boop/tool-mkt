@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -80,6 +81,10 @@ class AutomationSettingsTab(QWidget):
             self.attachment_combo.addItem(_ATTACHMENT_LABELS[key], key)
         self.attachment_combo.currentIndexChanged.connect(self._on_attachment_changed)
         form.addRow("Đính kèm khi đăng:", self.attachment_combo)
+        self.image_count_spin = QSpinBox()
+        self.image_count_spin.setRange(1, 10)
+        self.image_count_spin.setSuffix(" ảnh")
+        form.addRow("Số ảnh cho mỗi bài viết:", self.image_count_spin)
 
         self.auto_post_check = QCheckBox("Tự động đăng sau khi tạo xong")
         form.addRow("", self.auto_post_check)
@@ -165,6 +170,7 @@ class AutomationSettingsTab(QWidget):
         self._on_attachment_changed()
 
     def _on_attachment_changed(self) -> None:
+        self.image_count_spin.setEnabled(self.attachment_combo.currentData() == ATTACHMENT_IMAGE)
         is_video = self.attachment_combo.currentData() == ATTACHMENT_VIDEO
         self.video_options_label.setText(
             "Avatar/Voice mặc định cho Video:" if is_video
@@ -226,6 +232,7 @@ class AutomationSettingsTab(QWidget):
 
         self.tone_combo.setCurrentText(settings.get("automation_tone", "thân thiện, chuyên nghiệp"))
         self.hashtag_check.setChecked(bool(settings.get("automation_hashtags", True)))
+        self.image_count_spin.setValue(int(settings.get("automation_image_count", 1)))
 
         idx = self.attachment_combo.findData(settings.get("automation_attachment", ATTACHMENT_IMAGE))
         if idx >= 0:
@@ -286,6 +293,7 @@ class AutomationSettingsTab(QWidget):
         settings["automation_tone"] = self.tone_combo.currentText().strip() or "thân thiện, chuyên nghiệp"
         settings["automation_hashtags"] = self.hashtag_check.isChecked()
         settings["automation_attachment"] = self.attachment_combo.currentData()
+        settings["automation_image_count"] = self.image_count_spin.value()
         settings["automation_auto_post"] = self.auto_post_check.isChecked()
         settings["automation_platforms"] = platforms
         settings["automation_facebook_page_ids"] = [key for key, check in self.page_checks.items() if check.isChecked()]

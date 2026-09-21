@@ -25,6 +25,7 @@ from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import arrange_cards
 from app.ui.widgets.liquid_glass import GlassCard
 from app.ui.widgets.post_prompt_editor import PostPromptEditor
+from app.ui.widgets.processing_dialog import ProcessingDialog
 from app.workers.async_worker import Worker
 
 
@@ -39,6 +40,7 @@ class ContentTab(QWidget):
         self._worker: Worker | None = None
         self._generating = False
         self._build_ui()
+        self.processing_dialog = ProcessingDialog(self)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -135,6 +137,17 @@ class ContentTab(QWidget):
         self.result_text.setPlaceholderText("Nội dung được tạo sẽ xuất hiện ở đây. Bạn có thể chỉnh sửa trước khi sử dụng.")
         arrange_cards(layout, [("Thông tin bài viết", list(range(9))), ("Bản thảo", [9, 10, 11, 12])])
 
+    def load_archived_content(self, topic: str, text: str) -> bool:
+        if self._generating:
+            self.log_message.emit("Chờ tạo content xong trước khi mở bài viết đã lưu.", "info")
+            return False
+        self._clear_variants()
+        self.topic_input.setText(topic)
+        self.result_text.setPlainText(text)
+        self.result_text.setFocus()
+        self.log_message.emit("Đã mở bản sao để chỉnh sửa và tái sử dụng. Bài viết trong kho vẫn được giữ nguyên.", "info")
+        return True
+
     def _on_prompt_busy(self, busy: bool) -> None:
         self.generate_btn.setEnabled(not busy and not self._generating)
 
@@ -187,6 +200,7 @@ class ContentTab(QWidget):
             self._worker.progress.connect(lambda msg: self.log_message.emit(msg, "info"))
             self._worker.finished.connect(lambda texts: self._on_done(topic, texts))
         self._worker.error.connect(self._on_error)
+        self.processing_dialog.track(self._worker, f"Đang viết {count} content với {PROVIDER_LABELS[provider]}...")
         self._worker.start()
 
     @staticmethod

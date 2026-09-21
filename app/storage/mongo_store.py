@@ -10,6 +10,7 @@ a real BSON datetime so dashboard_stats() can do proper date-range queries.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import json
 
 from pymongo import MongoClient
 from pymongo.database import Database
@@ -76,6 +77,9 @@ def add_post(
     page_id: str = "",
     page_name: str = "",
     ok: bool = True,
+    error: str = "",
+    uncertain: bool = False,
+    link_url: str = "",
 ) -> None:
     _get_db()["posts"].insert_one(
         {
@@ -88,6 +92,8 @@ def add_post(
             "page_id": page_id,
             "page_name": page_name,
             "ok": bool(ok),
+            "schedule_status": json.dumps({"error": error, "uncertain": uncertain}, ensure_ascii=False) if error or uncertain else "",
+            "link_url": link_url,
         }
     )
 
@@ -173,7 +179,43 @@ def list_recent(table: str, limit: int = 20) -> list[dict]:
     return list(_get_db()[table].find().sort("_id", -1).limit(limit))
 
 
+def list_contents(query: str = "", limit: int = 50, offset: int = 0) -> list[dict]:
+    import re
+
+    pattern = {"$regex": re.escape(query), "$options": "i"}
+    criteria = {"$or": [{"topic": pattern}, {"text": pattern}]} if query else {}
+    return list(_get_db()["contents"].find(criteria).sort("_id", -1).skip(offset).limit(limit))
+
+
+def list_successful_posts(query: str = "", limit: int = 50, offset: int = 0) -> list[dict]:
+    import re
+
+    criteria = {"ok": True}
+    if query:
+        pattern = {"$regex": re.escape(query), "$options": "i"}
+        criteria["$or"] = [{key: pattern} for key in ("message", "page_name", "facebook_post_id")]
+    return list(_get_db()["posts"].find(criteria).sort("_id", -1).skip(offset).limit(limit))
+
+
 def delete_item(table: str, item_id) -> None:
     if table not in {"contents", "images", "videos", "posts"}:
         raise ValueError(f"Unknown table: {table}")
     _get_db()[table].delete_one({"_id": item_id})
+
+
+def update_post_fields(item_id, fields):
+    if not fields or set(fields) - {"message", "draft_message", "schedule_status"}:
+        raise ValueError("Invalid post fields")
+    result = _get_db()["posts"].update_one({"_id": item_id}, {"$set": fields})
+    if not result.matched_count:
+        raise ValueError("Bài viết không còn trong kho.")
+
+
+def list_scheduled_posts(query="", limit=30, offset=0):
+    import re
+    criteria = {"scheduled_time": {"$exists": True, "$nin": ["", None]},
+                "post_type": {"$in": ["text", "photo", "photos", "video"]}}
+    if query:
+        pattern = {"$regex": re.escape(query), "$options": "i"}
+        criteria["$or"] = [{key: pattern} for key in ("message", "page_name", "facebook_post_id")]
+    return list(_get_db()["posts"].find(criteria).sort([("scheduled_time", -1), ("_id", -1)]).skip(offset).limit(limit))

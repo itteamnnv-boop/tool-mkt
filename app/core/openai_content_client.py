@@ -60,10 +60,10 @@ class OpenAIContentClient:
             SYSTEM_PROMPT_VIDEO_SCRIPT, build_video_script_user_prompt(content_text), max_tokens=400, operation="kịch bản video"
         )
 
-    def suggest_video_script_from_reference(self, transcript: str, content_text: str = "") -> str:
+    def suggest_video_script_from_reference(self, transcript: str, content_text: str = "", **options) -> str:
         return self._complete(
             SYSTEM_PROMPT_VIDEO_SCRIPT_FROM_REFERENCE,
-            build_video_script_from_reference_user_prompt(transcript, content_text),
-            max_tokens=400,
+            build_video_script_from_reference_user_prompt(transcript, content_text, **options),
+            max_tokens=1000,
             operation="kịch bản video từ mẫu",
         )

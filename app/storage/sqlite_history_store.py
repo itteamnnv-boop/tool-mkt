@@ -3,6 +3,7 @@ Selected automatically by history_store.py; call functions there, not this modul
 from __future__ import annotations
 
 import sqlite3
+import json
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -81,6 +82,9 @@ def init_db() -> None:
         _ensure_column(conn, "posts", "page_id", "TEXT DEFAULT ''")
         _ensure_column(conn, "posts", "page_name", "TEXT DEFAULT ''")
         _ensure_column(conn, "posts", "ok", "INTEGER DEFAULT 1")
+        _ensure_column(conn, "posts", "draft_message", "TEXT")
+        _ensure_column(conn, "posts", "schedule_status", "TEXT DEFAULT ''")
+        _ensure_column(conn, "posts", "link_url", "TEXT DEFAULT ''")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
@@ -140,11 +144,14 @@ def add_post(
     page_id: str = "",
     page_name: str = "",
     ok: bool = True,
+    error: str = "",
+    uncertain: bool = False,
+    link_url: str = "",
 ) -> None:
     with _connect() as conn:
         conn.execute(
             "INSERT INTO posts (created_at, post_type, message, attachment_path, scheduled_time, "
-            "facebook_post_id, page_id, page_name, ok) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "facebook_post_id, page_id, page_name, ok, schedule_status, link_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 datetime.now().isoformat(timespec="seconds"),
                 post_type,
@@ -155,6 +162,8 @@ def add_post(
                 page_id,
                 page_name,
                 1 if ok else 0,
+                json.dumps({"error": error, "uncertain": uncertain}, ensure_ascii=False) if error or uncertain else "",
+                link_url,
             ),
         )
 
@@ -220,8 +229,58 @@ def list_recent(table: str, limit: int = 20) -> list[sqlite3.Row]:
         return cur.fetchall()
 
 
+def list_contents(query: str = "", limit: int = 50, offset: int = 0) -> list[dict]:
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        # Unicode casefold supports Vietnamese; instr treats wildcards literally.
+        conn.create_function("casefold", 1, lambda value: (value or "").casefold())
+        pattern = query.casefold()
+        rows = conn.execute(
+            "SELECT * FROM contents WHERE instr(casefold(topic), ?) > 0 OR instr(casefold(text), ?) > 0 "
+            "ORDER BY id DESC LIMIT ? OFFSET ?", (pattern, pattern, limit, offset)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def list_successful_posts(query: str = "", limit: int = 50, offset: int = 0) -> list[dict]:
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        conn.create_function("casefold", 1, lambda value: (value or "").casefold())
+        pattern = query.casefold()
+        rows = conn.execute(
+            "SELECT * FROM posts WHERE ok = 1 AND (instr(casefold(message), ?) > 0 "
+            "OR instr(casefold(page_name), ?) > 0 OR instr(casefold(facebook_post_id), ?) > 0) "
+            "ORDER BY id DESC LIMIT ? OFFSET ?", (pattern, pattern, pattern, limit, offset)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def delete_item(table: str, item_id: int) -> None:
     if table not in {"contents", "images", "videos", "posts"}:
         raise ValueError(f"Unknown table: {table}")
     with _connect() as conn:
         conn.execute(f"DELETE FROM {table} WHERE id = ?", (item_id,))
+
+
+def update_post_fields(item_id, fields):
+    if not fields or set(fields) - {"message", "draft_message", "schedule_status"}:
+        raise ValueError("Invalid post fields")
+    with _connect() as conn:
+        assignments = ", ".join(f"{key} = ?" for key in fields)
+        cursor = conn.execute(f"UPDATE posts SET {assignments} WHERE id = ?", (*fields.values(), item_id))
+        if not cursor.rowcount:
+            raise ValueError("Bài viết không còn trong kho.")
+
+
+def list_scheduled_posts(query="", limit=30, offset=0):
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        conn.create_function("casefold", 1, lambda value: (value or "").casefold())
+        pattern = query.casefold()
+        rows = conn.execute(
+            "SELECT * FROM posts WHERE COALESCE(scheduled_time, '') != '' "
+            "AND post_type IN ('text', 'photo', 'photos', 'video') "
+            "AND (instr(casefold(message), ?) > 0 OR instr(casefold(page_name), ?) > 0 "
+            "OR instr(casefold(facebook_post_id), ?) > 0) ORDER BY scheduled_time DESC, id DESC LIMIT ? OFFSET ?",
+            (pattern, pattern, pattern, limit, offset)).fetchall()
+        return [dict(row) for row in rows]

@@ -26,3 +26,14 @@ QLabel#logHeader { font-size: 12px; font-weight: 600; padding: 12px 14px; }
 QHeaderView::section { font-size: 13px; font-weight: 600; padding: 10px 8px; }
 QCheckBox { font-size: 14px; spacing: 8px; }
 QMenu::item { padding: 8px 14px; }
+QPushButton#railButton[sidebarNav="true"][expanded="true"] {
+    min-width: 170px; max-width: 170px; min-height: 32px; max-height: 32px;
+    padding: 0 10px; text-align: left; border-radius: 12px; font-size: 13px;
+}
+QPushButton#navGroupHeader {
+    font-size: 11px; font-weight: 600; text-align: left;
+    background: transparent; border: 0; border-radius: 6px;
+    padding: 5px 6px; min-width: 180px; max-width: 180px;
+    min-height: 18px; max-height: 18px;
+}
+QPushButton#navGroupHeader:hover { background: rgba(128,128,128,20); }
