@@ -45,6 +45,28 @@ def init_db() -> None:
     _get_db().client.admin.command("ping")
 
 
+def add_activity_log(message: str, level: str, created_at: str) -> None:
+    _get_db()["activity_logs"].insert_one({
+        "created_at": datetime.fromisoformat(created_at),
+        "level": level,
+        "message": message,
+    })
+
+
+def list_activity_logs(limit: int = 2000) -> list[dict]:
+    if limit <= 0:
+        return []
+    rows = list(_get_db()["activity_logs"].find().sort("_id", -1).limit(limit))
+    for row in rows:
+        if isinstance(row["created_at"], datetime):
+            row["created_at"] = row["created_at"].isoformat(timespec="seconds")
+    return list(reversed(rows))
+
+
+def clear_activity_logs() -> None:
+    _get_db()["activity_logs"].delete_many({})
+
+
 def get_prompt(key: str) -> str | None:
     document = _get_db()["prompts"].find_one({"_id": key})
     return document["text"] if document else None

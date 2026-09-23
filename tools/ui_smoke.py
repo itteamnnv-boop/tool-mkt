@@ -95,6 +95,19 @@ def main() -> None:
         window.show()
         app.processEvents()
 
+        # Closing progress only hides it; the toolbar next to the account restores it.
+        progress = window.image_tab.processing_dialog
+        progress.start("Đang tạo ảnh thử nghiệm")
+        progress.close()
+        assert not window.task_indicator.isHidden()
+        window.task_indicator.click()
+        assert progress.isVisible() and progress.scene.running
+        progress.finish("Hoàn tất")
+        window.task_indicator.click()
+        assert progress.isVisible() and not progress.scene.running
+        progress.reject()
+        assert window.task_indicator.isHidden()
+
         # Archived content opens a reusable copy and navigates to each destination.
         assert window.nav_key_group["archive"] == "creation"
         window.archive_tab.reuse_requested.emit("content", "Saved topic", "Saved text\n#tag")
@@ -367,7 +380,9 @@ def main() -> None:
         assert window.automation_settings_tab.avatar_combo.isEnabled()
         window.close()
         app.processEvents()
-        unexpected = [m for m in warnings if "propagateSizeHints" not in m]
+        # Offscreen Qt cannot raise the restored progress window; native platforms can.
+        unexpected = [m for m in warnings if "propagateSizeHints" not in m
+                      and not (app.platformName() == "offscreen" and m == "This plugin does not support raise()")]
         assert not unexpected, unexpected
         assert not issues, issues
         print("PASS: appearance preview/save/restore/reset, navigation, toolbar search/menu, window maximize/restore, inline settings, shared log, all pages at both sizes; no QSS/layout warnings or horizontal overflow.")

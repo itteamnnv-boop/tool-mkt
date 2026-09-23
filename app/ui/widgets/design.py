@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 from app.ui.widgets.liquid_glass import GlassCard
 
 _PATHS = {
+    "progress": '<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 3"/>',
     "archive": '<rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v13h14V8M9 12h6"/>',
     "minimize": '<path d="M5 12h14"/>',
     "maximize": '<rect x="5" y="5" width="14" height="14" rx="2"/>',

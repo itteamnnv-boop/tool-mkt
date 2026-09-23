@@ -9,6 +9,10 @@ Atlas cluster must never freeze the UI or block content/image/video generation o
 Reads (dashboard_stats/list_recent) run synchronously and let failures propagate — the
 app's global exception hook then shows a clear error instead of silently displaying
 zeroed-out or stale numbers.
+
+Activity logs use the configured backend. Writes and deletes are acknowledged
+before returning, so shutdown cannot discard pending daemon-thread writes and
+the log console can report storage failures.
 """
 from __future__ import annotations
 
@@ -45,6 +49,18 @@ def init_db() -> None:
         traceback.print_exc()
         if backend is mongo_store:
             sqlite_history_store.init_db()
+
+
+def add_activity_log(message: str, level: str, created_at: str) -> None:
+    _backend().add_activity_log(message, level, created_at)
+
+
+def list_activity_logs(limit: int = 2000) -> list[dict]:
+    return _backend().list_activity_logs(limit)
+
+
+def clear_activity_logs() -> None:
+    _backend().clear_activity_logs()
 
 
 def get_prompt(key: str) -> str | None:

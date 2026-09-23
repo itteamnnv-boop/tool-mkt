@@ -45,6 +45,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "content_provider": "claude",
     "claude_model": "claude-sonnet-5",
     "openai_text_model": "gpt-4o-mini",
+    "openai_layer_model": "gpt-5.4",
     "openai_image_model": "gpt-image-1",
     "heygen_avatar_id": "",
     "heygen_voice_id": "",

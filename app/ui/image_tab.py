@@ -7,6 +7,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -17,11 +19,13 @@ from PySide6.QtWidgets import (
 
 from app import config
 from app.core.image_client import ImageClient
+from app.core.grok_video_client import IMAGE_FILE_FILTER
 from app.core.text_provider import PROVIDER_CLAUDE, get_text_client
 from app.storage import history_store
 from app.ui.widgets.page_header import make_page_header
 from app.ui.widgets.design import arrange_cards
 from app.ui.widgets.media_preview import MediaPreview
+from app.ui.widgets.image_editor import ImageEditorDialog
 from app.workers.async_worker import Worker
 from app.ui.widgets.processing_dialog import ProcessingDialog
 
@@ -35,6 +39,7 @@ class ImageTab(QWidget):
         super().__init__(parent)
         self._content_context = ""
         self._current_image_path: Path | None = None
+        self._edit_versions = {}
         self._worker: Worker | None = None
         self._build_ui()
         self.processing_dialog = ProcessingDialog(self)
@@ -89,7 +94,41 @@ class ImageTab(QWidget):
         self.to_video_btn.setEnabled(False)
         self.to_video_btn.clicked.connect(self._on_use_for_video)
         layout.addWidget(self.to_video_btn)
-        arrange_cards(layout, [("Thiết lập hình ảnh", [0, 1, 2, 3, 4]), ("Xem trước", [5, 6, 7])])
+        self.edit_image_btn = QPushButton("Chỉnh sửa ảnh / Chọn vùng")
+        self.edit_image_btn.setObjectName("primaryButton")
+        self.edit_image_btn.clicked.connect(self._on_edit_image)
+        layout.addWidget(self.edit_image_btn)
+        self.open_edit_image_btn = QPushButton("Mở ảnh khác để chỉnh sửa")
+        self.open_edit_image_btn.setObjectName("linkButton")
+        self.open_edit_image_btn.clicked.connect(lambda: self._on_edit_image(choose_file=True))
+        layout.addWidget(self.open_edit_image_btn)
+        arrange_cards(layout, [("Thiết lập hình ảnh", [0, 1, 2, 3, 4]), ("Xem trước", [5, 8, 9, 6, 7])])
+
+    def _on_edit_image(self, checked=False, *, choose_file=False) -> None:
+        if self._worker and self._worker.isRunning():
+            self.log_message.emit("Chờ tác vụ ảnh hiện tại hoàn tất trước khi chỉnh sửa.", "info")
+            return
+        path = self._current_image_path
+        if choose_file or path is None:
+            filename, _ = QFileDialog.getOpenFileName(self, "Mở ảnh để chỉnh sửa", "", IMAGE_FILE_FILTER)
+            if not filename:
+                return
+            path = Path(filename)
+        if QPixmap(str(path)).isNull():
+            self.log_message.emit("Không đọc được ảnh đã chọn.", "error")
+            return
+        dialog = ImageEditorDialog(path, self._edit_versions.get(path), parent=self)
+        dialog.use_btn.setText("Dùng ảnh này")
+        result = dialog.exec()
+        for version_path, _ in dialog.versions:
+            self._edit_versions[version_path] = dialog.versions
+        if result == QDialog.DialogCode.Accepted:
+            self._current_image_path = dialog.current_path
+            self.preview_label.setPixmap(QPixmap(str(dialog.current_path)))
+            self.to_post_btn.setEnabled(True)
+            self.to_video_btn.setEnabled(True)
+            self.image_generated.emit(dialog.current_path)
+        dialog.deleteLater()
 
     def set_context_from_content(self, content_text: str) -> None:
         self._content_context = content_text

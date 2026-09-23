@@ -49,12 +49,32 @@ class HeyGenClient:
         raise RuntimeError(f"HeyGen API lỗi ({resp.status_code}): {detail}")
 
     def list_avatars(self) -> list[dict]:
-        data = self._get("/v2/avatars")
-        return data.get("data", {}).get("avatars", [])
+        """Return only this account's avatar looks, using the existing UI keys."""
+        rows = self._list_private("/v3/avatars/looks", {"ownership": "private", "limit": 50})
+        return [dict(row, avatar_id=row["id"], avatar_name=row.get("name") or row["id"])
+                for row in rows if row.get("id")]
 
     def list_voices(self) -> list[dict]:
-        data = self._get("/v2/voices")
-        return data.get("data", {}).get("voices", [])
+        """Return My Voices only; never fall back to the public library."""
+        return self._list_private("/v3/voices", {"type": "private", "limit": 100})
+
+    def _list_private(self, path: str, filters: dict) -> list[dict]:
+        rows = []
+        params = dict(filters)
+        seen_tokens = set()
+        while True:
+            page = self._get(path, params=params.copy())
+            data = page.get("data")
+            if not isinstance(data, list):
+                raise RuntimeError("HeyGen trả về danh sách cá nhân không hợp lệ.")
+            rows.extend(data)
+            if not page.get("has_more"):
+                return rows
+            token = page.get("next_token")
+            if not token or token in seen_tokens:
+                raise RuntimeError("Không thể tải đủ danh sách cá nhân từ HeyGen. Hãy thử lại.")
+            seen_tokens.add(token)
+            params["token"] = token
 
     def generate_video(
         self,
@@ -164,6 +184,55 @@ class HeyGenClient:
         if on_progress:
             on_progress("Đang tải video về máy...")
         return self.download(video_url, dest_dir)
+
+    def generate_from_prompt_and_wait(self, avatar_id: str, voice_id: str, script_text: str,
+                                     prompt: str, dest_dir: Path, on_progress=None,
+                                     on_thumbnail=None, cancel_event=None, timeout: float = 900) -> Path:
+        """Video Agent applies visual directions while retaining the chosen identity.
+
+        Reference: https://developers.heygen.com/docs/video-agent
+        """
+        if not avatar_id or not voice_id or not script_text.strip():
+            raise ValueError("Cần chọn Avatar, Voice và nhập kịch bản.")
+        if not 1 <= len(prompt.strip()) <= 10000:
+            raise ValueError("Prompt HeyGen cần từ 1 đến 10.000 ký tự (bao gồm kịch bản).")
+
+        def check_cancelled():
+            if cancel_event is not None and cancel_event.is_set():
+                raise GenerationCancelled("Đã dừng chờ Video Agent; tác vụ trên HeyGen có thể vẫn tiếp tục.")
+
+        check_cancelled()
+        response = self._post("/v3/video-agents", {
+            "prompt": prompt, "mode": "generate", "avatar_id": avatar_id, "voice_id": voice_id,
+        }).get("data", {})
+        session_id = response.get("session_id")
+        if not session_id:
+            raise RuntimeError("HeyGen không trả về session_id cho Video Agent.")
+        deadline = time.monotonic() + timeout
+        video_id = response.get("video_id")
+        while time.monotonic() < deadline:
+            check_cancelled()
+            session = self._get(f"/v3/video-agents/{session_id}").get("data", {})
+            if session.get("status") in {"failed", "cancelled", "stopped"}:
+                raise RuntimeError(f"Video Agent thất bại: {session.get('error') or session.get('status')}")
+            video_id = session.get("video_id") or video_id
+            if on_progress:
+                on_progress(f"HeyGen Video Agent: {session.get('status', 'generating')}")
+            if video_id:
+                video = self._get(f"/v3/videos/{video_id}").get("data", {})
+                if video.get("status") == "failed":
+                    raise RuntimeError(f"HeyGen tạo video thất bại: {video.get('error')}")
+                if video.get("status") == "completed":
+                    url = video.get("video_url")
+                    if not url:
+                        raise RuntimeError("HeyGen báo hoàn tất nhưng chưa trả về video_url.")
+                    check_cancelled()
+                    return self.download(url, dest_dir)
+            if cancel_event is not None:
+                cancel_event.wait(10)
+            else:
+                time.sleep(10)
+        raise TimeoutError("Hết thời gian chờ HeyGen Video Agent tạo video.")
 
     @staticmethod
     def download(video_url: str, dest_dir: Path) -> Path:

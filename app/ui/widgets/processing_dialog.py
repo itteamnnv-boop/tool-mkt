@@ -4,14 +4,17 @@ visual sign the app is still working — the timeline text updates, but only if 
 looking at that tab. This dialog stays on top and updates regardless of which tab is active."""
 from __future__ import annotations
 
-from PySide6.QtCore import QElapsedTimer, Qt, QTimer
+from PySide6.QtCore import QElapsedTimer, Qt, QTimer, Signal
 from PySide6.QtWidgets import QDialog, QLabel, QProgressBar, QPushButton, QVBoxLayout
 from app.ui.widgets.process_scene import DEFAULT_STAGES, ProcessScene
 
 
 class ProcessingDialog(QDialog):
+    state_changed = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.has_activity = False
         self.setObjectName("processingDialog")
         self.setWindowTitle("Đang xử lý")
         self.setModal(False)
@@ -45,17 +48,19 @@ class ProcessingDialog(QDialog):
         self.elapsed_timer.setInterval(1000)
         self.elapsed_timer.timeout.connect(self._update_elapsed)
 
-        hint = QLabel("Các bước cập nhật theo tác vụ thực tế. Có thể ẩn dialog để tiếp tục làm việc; tác vụ vẫn chạy nền.")
+        hint = QLabel("Đóng hoặc thu gọn để tiếp tục làm việc; tác vụ vẫn chạy. Bấm biểu tượng tiến trình cạnh tài khoản để mở lại.")
         hint.setObjectName("mutedHint")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        self.hide_btn = QPushButton("Ẩn")
+        self.hide_btn = QPushButton("Thu gọn")
         self.hide_btn.setObjectName("linkButton")
-        self.hide_btn.clicked.connect(self.hide)
+        self.hide_btn.clicked.connect(self.reject)
         layout.addWidget(self.hide_btn, 0, Qt.AlignmentFlag.AlignRight)
 
     def start(self, status: str, stages=None) -> None:
+        self.has_activity = True
+        self.hide_btn.setText("Thu gọn")
         self.scene.configure(stages or DEFAULT_STAGES)
         if stages is None:
             self.scene.set_stage("start", "done")
@@ -68,9 +73,29 @@ class ProcessingDialog(QDialog):
         self.show()
         self.raise_()
         self.activateWindow()
+        self.state_changed.emit()
 
     def set_status(self, status: str) -> None:
         self.status_label.setText(status)
+        self.state_changed.emit()
+
+    def restore(self) -> None:
+        """Reopen the existing progress view without restarting its worker or clock."""
+        if self.has_activity:
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+
+    def reject(self) -> None:
+        # X, Escape and the button only dismiss the view, never the worker.
+        if not self.scene.running:
+            self.has_activity = False
+        self.hide()
+        self.state_changed.emit()
+
+    def closeEvent(self, event) -> None:
+        event.ignore()
+        self.reject()
 
     def set_stage(self, key: str, state: str = "active") -> None:
         self.scene.set_stage(key, state)
@@ -99,4 +124,6 @@ class ProcessingDialog(QDialog):
         self._update_elapsed()
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(1 if outcome == "done" else 0)
+        self.hide_btn.setText("Đóng")
         self.hide()
+        self.state_changed.emit()

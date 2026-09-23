@@ -60,6 +60,15 @@ CREATE TABLE IF NOT EXISTS prompts (
 );
 """
 
+ACTIVITY_LOG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    level TEXT NOT NULL,
+    message TEXT NOT NULL
+);
+"""
+
 
 def _db_path() -> Path:
     return app_data_dir() / "history.sqlite3"
@@ -79,6 +88,7 @@ def init_db() -> None:
     with _connect() as conn:
         conn.executescript(SCHEMA)
         conn.executescript(PROMPT_SCHEMA)
+        conn.executescript(ACTIVITY_LOG_SCHEMA)
         _ensure_column(conn, "posts", "page_id", "TEXT DEFAULT ''")
         _ensure_column(conn, "posts", "page_name", "TEXT DEFAULT ''")
         _ensure_column(conn, "posts", "ok", "INTEGER DEFAULT 1")
@@ -92,6 +102,31 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str)
     existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
     if column not in existing:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
+def add_activity_log(message: str, level: str, created_at: str) -> None:
+    with _connect() as conn:
+        conn.executescript(ACTIVITY_LOG_SCHEMA)
+        conn.execute(
+            "INSERT INTO activity_logs (created_at, level, message) VALUES (?, ?, ?)",
+            (created_at, level, message),
+        )
+
+
+def list_activity_logs(limit: int = 2000) -> list[dict]:
+    with _connect() as conn:
+        conn.executescript(ACTIVITY_LOG_SCHEMA)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM activity_logs ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
+
+def clear_activity_logs() -> None:
+    with _connect() as conn:
+        conn.executescript(ACTIVITY_LOG_SCHEMA)
+        conn.execute("DELETE FROM activity_logs")
 
 
 def get_prompt(key: str) -> str | None:

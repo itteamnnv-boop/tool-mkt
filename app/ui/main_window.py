@@ -43,6 +43,7 @@ from app.ui.widgets.design import compact_labels, line_icon
 from app.ui.widgets.toast import Toast
 from app.ui.widgets.glass_chrome import GlassTitleBar
 from app.ui.widgets.liquid_glass import apply_button_elevation
+from app.ui.widgets.task_indicator import TaskIndicator
 
 # Each entry is either ("header", label) or ("item", label, key).
 NAV_ENTRIES = [
@@ -107,6 +108,12 @@ class MainWindow(QMainWindow):
 
         self._page_stack_index: dict[str, int] = {}
         self._build_ui()
+        for entry in NAV_ENTRIES:
+            if entry[0] == "item":
+                tab = getattr(self, entry[2] + "_tab", None)
+                dialog = getattr(tab, "processing_dialog", None)
+                if dialog is not None:
+                    self.task_indicator.register(entry[1].split("  ")[-1], dialog)
         self.toast = Toast(self)
         self._wire_signals()
         self._show_page("dashboard")
@@ -340,6 +347,8 @@ class MainWindow(QMainWindow):
         logs_button = self._icon_button("logs", "Nhật ký hoạt động")
         logs_button.clicked.connect(lambda: self._show_page("logs"))
         toolbar.addWidget(logs_button)
+        self.task_indicator = TaskIndicator(self)
+        toolbar.addWidget(self.task_indicator)
         profile = self._icon_button("user", "Cài đặt tài khoản và ứng dụng")
         profile.setObjectName("profileButton")
         profile.clicked.connect(lambda: self._show_page("settings"))

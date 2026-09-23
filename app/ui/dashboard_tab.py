@@ -5,9 +5,10 @@ from PySide6.QtCore import Signal, Qt
 from app.ui.widgets.design import line_icon
 from app.ui.widgets.studio_hero import StudioHero
 from app.ui.widgets.liquid_glass import GlassCard
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from app.storage import history_store
+from app.core.usage_cost import PRICE_DATE, OPENAI_PRICING, CLAUDE_PRICING, GROK_PRICING, summarize_costs
 from app.ui.widgets.page_header import make_page_header
 
 
@@ -109,8 +110,9 @@ class DashboardTab(QWidget):
         layout.addLayout(grid)
         token_panel = GlassCard()
         token_panel.setObjectName("metricCard")
-        token_layout = QHBoxLayout(token_panel)
-        token_layout.setContentsMargins(20, 16, 20, 18)
+        usage_layout = QVBoxLayout(token_panel)
+        usage_layout.setContentsMargins(20, 16, 20, 18)
+        token_layout = QHBoxLayout()
         token_layout.setSpacing(16)
         self.token_total = QLabel("0 token")
         self.token_total.setObjectName("tokenTotal")
@@ -120,16 +122,36 @@ class DashboardTab(QWidget):
         token_layout.addWidget(QLabel("Token AI đã sử dụng"), 1)
         token_layout.addWidget(self.token_detail, 2)
         token_layout.addWidget(self.token_total)
+        usage_layout.addLayout(token_layout)
+        cost_row = QHBoxLayout()
+        self.cost_title = QLabel("Chi phí đã sử dụng · ước tính (USD)")
+        self.cost_title.setWordWrap(True)
+        self.cost_total = QLabel("$0.0000")
+        self.cost_total.setObjectName("tokenTotal")
+        cost_row.addWidget(self.cost_title, 1)
+        cost_row.addWidget(self.cost_total)
+        usage_layout.addLayout(cost_row)
+        self.cost_detail = QLabel()
+        self.cost_detail.setObjectName("metricToday")
+        self.cost_detail.setWordWrap(True)
+        usage_layout.addWidget(self.cost_detail)
+        self.cost_total.setToolTip(
+            f"Giá chuẩn đối chiếu {PRICE_DATE}. Ước tính từ lịch sử trong ứng dụng, không phải hóa đơn.\n"
+            "Chưa điều chỉnh giảm giá cache, thuế hoặc tín dụng.\n"
+            "Khoảng tiền xuất hiện khi chưa tách được token văn bản và ảnh đầu vào.\n"
+            + OPENAI_PRICING + "\n" + CLAUDE_PRICING + "\n" + GROK_PRICING
+        )
         layout.addWidget(token_panel)
         layout.addWidget(QLabel("Chi tiết theo nhà cung cấp / model"))
-        self.provider_table = QTableWidget(0, 4)
+        self.provider_table = QTableWidget(0, 5)
         self.provider_table.setObjectName("dashboardTable")
-        self.provider_table.setHorizontalHeaderLabels(["Nhà cung cấp", "Model", "Input", "Output"])
+        self.provider_table.setHorizontalHeaderLabels(["Nhà cung cấp", "Model", "Input", "Output", "Chi phí ước tính (USD)"])
         self.provider_table.verticalHeader().setVisible(False)
         self.provider_table.verticalHeader().setDefaultSectionSize(40)
         self.provider_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.provider_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        self.provider_table.horizontalHeader().setStretchLastSection(True)
+        self.provider_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.provider_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.provider_table.setMinimumHeight(130)
         layout.addWidget(self.provider_table, 1)
 
@@ -142,8 +164,21 @@ class DashboardTab(QWidget):
         self.token_total.setText(f"{input_tokens + output_tokens:,} token")
         self.token_detail.setText(f"Input: {input_tokens:,}  •  Output: {output_tokens:,}  •  {stats['token_requests']:,} yêu cầu được ghi nhận")
         providers = stats["providers"]
+        costs, total, missing = summarize_costs(providers)
+        self.cost_total.setText(total.display() if not providers or any(costs) else "Chưa đủ dữ liệu")
+        self.cost_title.setText("Chi phí đã sử dụng · ước tính (USD)" if not missing else "Chi phí đã tính được · ước tính (USD)")
+        detail = "Chỉ tính token đã ghi nhận; chưa gồm phí video, âm thanh và các khoản ngoài lịch sử."
+        if missing:
+            detail += f" {missing:,} yêu cầu chưa có giá hoặc thiếu dữ liệu."
+        self.cost_detail.setText(detail)
         self.provider_table.setRowCount(len(providers))
         for row, (provider, model, input_count, output_count, _) in enumerate(providers):
-            for col, text in enumerate((provider, model, f"{input_count:,}", f"{output_count:,}")):
-                self.provider_table.setItem(row, col, QTableWidgetItem(str(text)))
-        self.provider_table.resizeColumnsToContents()
+            cost = costs[row]
+            for col, text in enumerate((provider, model, f"{input_count:,}", f"{output_count:,}",
+                                        cost.display() if cost else "Chưa đủ dữ liệu")):
+                item = QTableWidgetItem(str(text))
+                if col >= 2:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                if col == 4:
+                    item.setToolTip(self.cost_total.toolTip() if cost else "Chưa có bảng giá cho model này hoặc chưa ghi nhận token.")
+                self.provider_table.setItem(row, col, item)

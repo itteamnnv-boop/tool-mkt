@@ -3,6 +3,95 @@
 Desktop app (Python + PySide6) dùng **Claude API làm lõi** để viết content, sinh ảnh (OpenAI),
 sinh video avatar (HeyGen), rồi đăng thẳng lên Facebook Page (Graph API).
 
+### Thu gọn tiến trình
+
+Trong hộp thoại loading, bấm **Thu gọn**, **X** hoặc **Esc** để ẩn hộp thoại;
+tác vụ tiếp tục chạy. Biểu tượng đồng hồ cạnh nút tài khoản hiển thị số tác vụ.
+Bấm biểu tượng để mở lại; nếu có nhiều tác vụ, chọn tác vụ trong danh sách.
+Kết quả hoàn tất, dừng hoặc lỗi được giữ để xem lại; đóng sau khi xem kết quả
+sẽ bỏ mục đó khỏi biểu tượng. Mỗi chức năng giữ tiến trình gần nhất trong phiên mở ứng dụng.
+
+### Theo dõi chi phí
+
+Dashboard hiển thị **Chi phí đã sử dụng · ước tính (USD)** và chi phí theo từng model,
+tính từ token đã ghi nhận ở SQLite hoặc MongoDB. Bấm **Làm mới** để cập nhật.
+Bảng giá chuẩn được đối chiếu ngày 23/09/2026 từ
+[OpenAI](https://developers.openai.com/api/docs/pricing) và
+[Claude](https://platform.claude.com/docs/en/about-claude/pricing).
+Dữ liệu ảnh cũ chưa tách token văn bản/ảnh đầu vào nên hiển thị khoảng tiền.
+Model chưa có giá hoặc thiếu token hiển thị **Chưa đủ dữ liệu**, không được tính là miễn phí.
+Đây là ước tính theo bảng giá trên, không phải hóa đơn hoặc số dư tài khoản;
+chưa điều chỉnh cache, thuế, tín dụng, phí video/âm thanh và yêu cầu ngoài lịch sử.
+
+### Tạo video Grok theo từng bước
+
+Trong tab **Video**, chọn **Grok**. Phần chuẩn bị được tách thành hai màn hình ngắn
+trước khi dựng video: **Vật liệu → Kịch bản → Tạo video**.
+
+1. **Vật liệu:** ghi bối cảnh, chọn khung hình và tạo ảnh với OpenAI hoặc chọn ảnh có sẵn.
+   Bước này chưa cần kịch bản.
+   Có thể **Đính kèm hình mẫu để tạo ảnh**, nhập bối cảnh/mô tả rồi tạo vật liệu dựa trên mẫu.
+   Hỗ trợ một hình mẫu PNG/JPG/WebP nhỏ hơn 50 MB; có nút **Xem**, **Đổi hình mẫu** và **Bỏ mẫu**.
+   Chọn model GPT Image trong Cài đặt để dùng tính năng này. Hình mẫu là đầu vào tạo ảnh;
+   ảnh kết quả mới được tự động đính kèm vào luồng dựng video.
+   Mục **Đính kèm khuôn mặt tham chiếu** nhận một ảnh chân dung riêng, có thể dùng cùng
+   hình mẫu bối cảnh. Có nút xem, đổi và bỏ ảnh khuôn mặt. Khi tạo vật liệu, ứng dụng gửi
+   cả hai ảnh và yêu cầu ưu tiên đặc điểm khuôn mặt từ ảnh chân dung cho nhân vật chính.
+   Mục **Tùy chỉnh mô tả và loại ảnh** cho phép mô tả riêng hoặc tạo ảnh tham chiếu
+   (tối đa 4 ảnh). Ảnh tự động đính kèm và hiển thị lớn bên phải; chọn từng ảnh để xem lại.
+   Có ít nhất một ảnh thì mới tiếp tục. Tạo lại ảnh khởi đầu sẽ thay ảnh đang chọn;
+   ảnh đã tạo được lưu trong thư mục đầu ra và lịch sử hình ảnh.
+   Để sửa ảnh, chọn vật liệu bên phải rồi nhập yêu cầu vào **Chỉnh ảnh đang chọn bằng mô tả**
+   và bấm **Áp dụng chỉnh sửa** (ví dụ: đổi nền, thêm đạo cụ, đổi trang phục).
+   Mỗi lần sửa dùng chính ảnh đang chọn và ảnh khuôn mặt tham chiếu nếu có. Kết quả thay
+   đúng vật liệu đó để dùng cho video; ảnh gốc vẫn được giữ. Có thể sửa tiếp hoặc chọn lại
+   **Phiên bản** trước trong phiên làm việc. Mọi ảnh chỉnh sửa được lưu vào lịch sử hình ảnh.
+   Nút **Mở trình chỉnh sửa ảnh · Chọn vùng** mở không gian chỉnh sửa lớn với lịch sử ảnh
+   thu nhỏ, thu phóng, di chuyển ảnh, khoanh nhiều vùng bằng chuột và đặt tên từng vùng.
+   Tích các vùng cần sửa, nhập mô tả rồi bấm **Áp dụng chỉnh sửa AI**; bỏ mọi vùng để sửa
+   toàn ảnh. Có thể cắt ảnh theo vùng, lưu ảnh ra tệp và chọn **Dùng ảnh này làm vật liệu**.
+   Bấm **AI phân tích lớp** để nhận diện các vật liệu (tóc, áo, quần, giày, nền…)
+   và tinh chỉnh đường biên theo điểm ảnh. Chọn lớp trong danh sách hoặc bấm trực tiếp
+   lên ảnh; **Ctrl + bấm** để chọn nhiều lớp. Mỗi lớp có ảnh thu nhỏ, tên, mô tả vị trí
+   và tọa độ trên ảnh gốc; các thông tin này được gửi cùng yêu cầu chỉnh sửa.
+   Dùng **Tô thêm vào lớp / Xóa bớt khỏi lớp** để sửa biên, hoặc khoanh vùng thủ công.
+   **Lưu lớp thành vật liệu PNG** xuất riêng lớp với nền trong suốt vào tệp và lịch sử.
+   Phân tích lớp dùng model riêng ở mục **Model phân tích lớp**
+   trong trình chỉnh sửa: mặc định **GPT-5.4**, hoặc **GPT-4o mini** để tiết kiệm.
+   Lựa chọn được lưu khi bấm phân tích, không đổi model viết content. GPT-5.4 dùng
+   ảnh chi tiết `original` (cạnh dài tối đa 3072 px) và suy luận cao; có thể chậm
+   và tốn phí hơn. Token và chi phí ước tính được ghi trên Dashboard.
+   Có thể chọn **Grok 4.7 · xAI**, dùng **Grok API key** đã nhập trong Cài đặt;
+   các model GPT dùng OpenAI API key. Grok nhận diện lớp qua API thị giác rồi ứng dụng
+   tinh chỉnh vùng chọn; chưa bảo đảm giống bộ tách lớp trên grok.com.
+   Chỉnh sửa ảnh bằng mô tả sau khi chọn lớp vẫn dùng OpenAI như trước.
+   Tính năng cần numpy/OpenCV trong requirements.txt. Nếu tài khoản chưa có quyền
+   dùng model, lỗi được hiển thị và giữ nguyên các lớp cũ; không tự đổi sang model khác.
+   Đường biên AI chỉ là ước lượng, cần xem lại trước khi áp dụng. Với chỉnh sửa theo vùng,
+   ứng dụng ghép kết quả vào vùng chọn và giữ nguyên điểm ảnh bên ngoài.
+   Phân tích hỗ trợ vùng rỗng bên trong lớp, loại vật thể khỏi lớp nền và xử lý vùng
+   chồng lấn để mỗi điểm ảnh chỉ thuộc một lớp trong kết quả phân tích. Lớp chưa tinh
+   chỉnh được biên hoặc có chồng lấn lớn sẽ được báo cần kiểm tra. Bấm vào chỗ trống
+   sẽ bỏ vùng chọn cũ; cần chọn lại lớp trước khi chỉnh sửa.
+   Đây là nhận diện bằng mô hình thị giác kết hợp GrabCut, chưa phải bộ phân vùng
+   chuyên dụng; ảnh có nhiều chi tiết hoặc màu tương tự nhau vẫn có thể cần sửa bằng cọ.
+   Các lớp được giữ theo từng phiên bản trong lúc cửa sổ chỉnh sửa còn mở;
+   ảnh phiên bản mới cần phân tích lại để khớp vị trí đồ vật.
+   Trình chỉnh sửa cũng có trong tab **Hình ảnh**, hỗ trợ mở ảnh từ máy.
+2. **Kịch bản:** dựa trên ảnh và bối cảnh đã chuẩn bị để viết nội dung, hành động, lời thoại
+   và chuyển động máy quay. Mở **Lấy ý tưởng từ video mẫu** nếu cần phân tích mẫu.
+   Có kịch bản thì nút **Tiếp tục** mới mở; ảnh từ bước 1 vẫn hiển thị bên phải để tham khảo.
+3. **Tạo video:** kiểm tra kịch bản, bối cảnh, danh sách ảnh, độ phân giải và thời lượng,
+   rồi bấm **Tạo video với Grok**. Ứng dụng gửi đầy đủ nội dung và ảnh đã đính kèm.
+   Khi hoàn tất, bấm **Mở video** hoặc chuyển video sang tab đăng bài.
+
+Mỗi màn hình chỉ hiển thị nội dung của bước hiện tại. Các nút **Quay lại** giữ nguyên
+kịch bản và vật liệu; trong lúc xử lý, việc chuyển bước và sửa đầu vào được khóa.
+
+Luồng Grok yêu cầu kịch bản và ít nhất một ảnh hợp lệ. Tạo ảnh cần OpenAI API key;
+tạo video cần Grok API key. Nếu đã có ảnh, có thể đính kèm mà không gọi OpenAI.
+HeyGen vẫn dùng kịch bản, avatar và voice như trước.
+
 ## 1. Cài đặt
 
 ```bash

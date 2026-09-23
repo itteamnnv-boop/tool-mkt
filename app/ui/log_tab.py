@@ -30,7 +30,7 @@ class LogTab(QWidget):
 
         self.clear_btn = QPushButton("Xoá nhật ký")
         self.clear_btn.setObjectName("linkButton")
-        self.clear_btn.setToolTip("Xoá toàn bộ nội dung nhật ký đang hiển thị")
+        self.clear_btn.setToolTip("Xoá toàn bộ nhật ký đã lưu, kể cả các phiên trước")
         header_row.addWidget(self.clear_btn, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header_row)
 
@@ -40,7 +40,7 @@ class LogTab(QWidget):
         console_layout.setContentsMargins(8, 8, 8, 8)
         console_layout.setSpacing(0)
 
-        console_header = QLabel("●  NHẬT KÝ PHIÊN LÀM VIỆC")
+        console_header = QLabel("●  NHẬT KÝ HOẠT ĐỘNG · 2.000 DÒNG GẦN NHẤT")
         console_header.setObjectName("logHeader")
         console_layout.addWidget(console_header)
 
